@@ -1,44 +1,43 @@
-// טוען books/books.json ומציג “כרטיס” לכל ספר: תמונה מימין, טקסט משמאל.
 (async function init(){
   const mount = document.getElementById('books');
   try{
     const res = await fetch('books/books.json');
-    if(!res.ok) throw new Error('books.json not found');
+    if(!res.ok) throw new Error('Missing books.json');
     const books = await res.json();
 
     mount.innerHTML = '';
-    books.forEach(b => mount.appendChild(renderBook(b)));
-  }catch(err){
-    console.error(err);
-    document.getElementById('books').innerHTML =
-      '<div class="pill">בעיה בטעינת רשימת הספרים</div>';
+    books.forEach(b => mount.appendChild(card(b)));
+  }catch(e){
+    console.error(e);
+    mount.innerHTML = '<div class="pill">שגיאה בטעינת רשימת הספרים</div>';
   }
 })();
 
-function renderBook(book){
-  const card = el('article','book-card');
-
-  // תמונה מימין (קטנה)
-  const imgWrap = el('a','book-thumb');
-  imgWrap.href = `reader.html?book=${encodeURIComponent(book.slug)}`;
+function card(b){
+  const aThumb = el('a','book-thumb');
+  aThumb.href = `reader.html?book=${encodeURIComponent(b.slug)}`;
   const img = new Image();
+  img.alt = b.title || b.slug;
   img.loading = 'lazy';
-  img.alt = book.title || book.slug;
-  img.src = book.cover || `books/${book.slug}/images/image-1.jpg`;
-  imgWrap.appendChild(img);
+  img.src = b.cover || `books/${b.slug}/images/image-1.jpg`;
+  aThumb.appendChild(img);
 
-  // טקסט משמאל
+  const open = el('a','book-open');
+  open.href = `reader.html?book=${encodeURIComponent(b.slug)}`;
+  open.textContent = 'פתח';
+
   const info = el('div','book-info');
-  const h2 = el('h2','book-title'); h2.textContent = book.title || book.slug;
-  const sub = el('div','book-sub'); sub.textContent = book.subtitle || '';
-  const desc = el('p','book-desc'); desc.textContent = book.description || '';
-  const open = el('a','book-open'); open.textContent = 'פתח';
-  open.href = `reader.html?book=${encodeURIComponent(book.slug)}`;
+  info.append(
+    h('h2','book-title', b.title || b.slug),
+    h('div','book-sub', b.subtitle || ''),
+    h('p','book-desc', b.description || ''),
+    open
+  );
 
-  info.append(h2, sub, desc, open);
-  // סדר “תמונה מימין, טקסט משמאל” (row-reverse ב־CSS)
-  card.append(info, imgWrap);
+  const card = el('article','book-card');
+  card.append(info, aThumb); // תמונה מימין, טקסט משמאל (RTL)
   return card;
 }
 
 function el(t,c){ const d=document.createElement(t); if(c) d.className=c; return d; }
+function h(t,c,txt){ const d=el(t,c); d.textContent=txt; return d; }
