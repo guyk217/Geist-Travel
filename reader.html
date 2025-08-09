@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Reader • Geist Family</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .back { margin:18px 0; }
+    .back a { text-decoration:none; color:#444; border:1px solid #ddd; padding:.45rem .7rem; border-radius:10px; background:#fafafa; }
+    .book-title { text-align:center; margin:6px 0 18px; }
+    .book-title h1 { margin:0; font-size:42px; font-family:"Pilcrow Rounded", system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <header class="hero">
+    <div class="back"><a href="index.html">← חזרה למדף</a></div>
+    <div class="book-title">
+      <h1 id="bookTitle">Loading…</h1>
+      <p id="bookSubtitle" class="subtitle"></p>
+    </div>
+  </header>
+
+  <main class="container">
+    <div id="sections" class="sections" aria-live="polite"></div>
+  </main>
+
+  <script src="js/reader.js"></script>
+</body>
+</html>
