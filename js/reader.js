@@ -1,151 +1,135 @@
-// קריאת ספר: מפרק לפי מפרידי ********, מצמיד תמונות {image-N},
-// מציג Place/Date כשבבי מידע, ודפדוף ע"י החלקה (סוויפ).
+// Minimal reader: loads the book, builds slides, swipe + buttons.
 
-(function () {
-  const params = new URLSearchParams(location.search);
-  const slug   = params.get('slug') || 'europe-roots-1993'; // ברירת מחדל לספר שלך
-  const base   = `books/${slug}`;
-  const txtURL = `${base}/book.txt`;
-  const imgDir = `${base}/images`;
+const qs = (s,el=document)=>el.querySelector(s);
+const track = qs('#track');
+const pager = qs('#pager');
+const prevBtn = qs('#prevBtn');
+const nextBtn = qs('#nextBtn');
 
-  const canvas = document.getElementById('canvas');
-  const pager  = document.getElementById('pager');
-  const hint   = document.getElementById('hint');
+const url = new URL(location.href);
+const slug = url.searchParams.get('slug') || 'europe-roots-1993';
+const TXT_URL = `books/${slug}/book.txt`;
+const IMG_DIR = `books/${slug}/images/`;
+const IMG_EXTS = ['.jpg','.jpeg','.png','.webp'];
 
-  // --------- Utilities ----------
-  const IMG_EXTS = ['jpg','jpeg','png','webp'];
+let pages = [];
+let idx = 0;
+let startX = 0, curX = 0, dragging = false;
 
-  function imgHTML(num){
-    // טריק זעיר: נטען <picture> עם כמה פורמטים; הדפדפן יבחר מה שקיים.
-    const name = `image-${num}`;
-    const sources = IMG_EXTS.map(ext => `<source srcset="${imgDir}/${name}.${ext}" type="image/${ext==='jpg'?'jpeg':ext}">`).join('');
-    // נפילה ל-JPG (אם אין כלום – יוצג ריבוע "חסר תמונה")
-    return `
-      <picture onerror="this.outerHTML='<div class=chip>Missing ${name}</div>'">
-        ${sources}
-        <img src="${imgDir}/${name}.jpg" alt="${name}">
-      </picture>`;
+async function headExists(url){
+  try{ const r = await fetch(url, {method:'HEAD'}); return r.ok; }
+  catch{ return false; }
+}
+async function resolveImageTag(num){
+  const base = IMG_DIR + `image-${num}`;
+  for (const ext of IMG_EXTS){
+    const u = base + ext;
+    if (await headExists(u)) return `<img src="${u}" alt="image-${num}">`;
   }
+  return `<div class="pill">Missing image-${num}</div>`;
+}
 
-  function splitParts(raw){
-    // ננרמל שורות, נחליף תמונות, ונפצל.
-    let text = raw.replace(/\r\n?/g, '\n');
+async function loadBook(){
+  const res = await fetch(TXT_URL);
+  if(!res.ok) throw new Error('book.txt not found');
+  let raw = await res.text();
 
-    // החלפת {image-N} ל-HTML (נשאיר בלי escaping מכיוון שהטקסט שלנו “נקי”)
-    text = text.replace(/\{image-(\d+)\}/g, (_,n)=> imgHTML(n));
+  // Replace {image-N} async
+  const tasks = [];
+  raw = raw.replace(/\{image-(\d+)\}/g, (m,num)=>{
+    const ph = `@@IMG_${num}@@`;
+    tasks.push((async()=>({ph, html: await resolveImageTag(num)}))());
+    return ph;
+  });
+  const repl = await Promise.all(tasks);
+  for (const r of repl) raw = raw.replaceAll(r.ph, r.html);
 
-    // מפצלים על שורה של 8+ כוכביות – עם או בלי רווחים מסביב
-    const parts = text.split(/(?:^|\n)\*{8,}\s*(?:\n|$)/).map(s=>s.trim());
-    return parts.filter(p => p.length); // בלי חלקים ריקים
-  }
+  // Split by ******** lines (8+ stars). Filter *true* empty parts.
+  const rough = raw.split(/\r?\n\*{8,}\r?\n/g);
+  pages = rough
+    .map(s => s.trim())
+    .filter(s => s.replace(/<[^>]+>/g,'').trim().length > 0);
 
-  function extractMetaAndBody(part){
-    // מוציא Place/Date משתי שורות ראשונות אם קיימות
+  buildSlides();
+  go(0, true);
+}
+
+function buildSlides(){
+  track.innerHTML = '';
+  pages.forEach(part=>{
+    // extract top Place/Date
     let place=null, date=null, body=part;
+    body = body.replace(/^(Place:\s*)(.+)\s*\r?\n/i, (_,p,v)=>{ place=v.trim(); return ''});
+    body = body.replace(/^(Date:\s*)(.+)\s*\r?\n/i,  (_,p,v)=>{ date=v.trim();  return ''});
+    // single * line -> decorative star
+    body = body.replace(/\r?\n\*\r?\n/g, '\n<div class="star-hr"><span class="star">★</span></div>\n');
 
-    body = body.replace(/^(?:Place:\s*)(.+)\s*\n/i, (_,v)=>{ place=v.trim(); return '' });
-    body = body.replace(/^(?:Date:\s*)(.+)\s*\n/i,  (_,v)=>{ date =v.trim(); return '' });
+    const page = document.createElement('div');
+    page.className='page';
+    page.innerHTML = `
+      <article class="page-inner">
+        ${ (place||date) ? `
+        <div class="meta">
+          ${date ? `<span class="pill">Date: ${date}</span>`:''}
+          ${place? `<span class="pill">Place: ${place}</span>`:''}
+        </div>`:''}
+        <div class="content">${body}</div>
+      </article>
+    `;
+    track.appendChild(page);
+  });
+  updatePager();
+}
 
-    // שורה של כוכבית בודדת => קו דקורטיבי
-    body = body.replace(/(?:^|\n)\*\s*(?:\n|$)/g, '\n@@STAR@@\n');
+// navigation
+function go(i, instant=false){
+  idx = Math.max(0, Math.min(pages.length-1, i));
+  const x = -idx * 100;
+  track.style.transition = instant ? 'none' : 'transform .35s ease';
+  track.style.transform = `translateX(${x}%)`;
+  requestAnimationFrame(()=>{ track.style.transition='transform .35s ease'; });
+  updatePager();
+}
+function updatePager(){ pager.textContent = `${idx+1}/${pages.length}`; }
 
-    return { place, date, body: body.trim() };
-  }
+// swipe handlers
+function onDown(e){
+  dragging = true;
+  startX = (e.touches? e.touches[0].clientX : e.clientX);
+  curX = startX;
+}
+function onMove(e){
+  if(!dragging) return;
+  curX = (e.touches? e.touches[0].clientX : e.clientX);
+  const dx = curX - startX;
+  track.style.transition='none';
+  const w = window.innerWidth;
+  const offset = (-idx*100) + (dx/w*100);
+  track.style.transform = `translateX(${offset}%)`;
+}
+function onUp(){
+  if(!dragging) return; dragging=false;
+  const dx = curX - startX;
+  const TH = Math.min(120, window.innerWidth*0.18);
+  if (dx < -TH) go(idx+1);
+  else if (dx > TH) go(idx-1);
+  else go(idx); // snap back
+}
 
-  function pageDOM(meta){
-    const art = document.createElement('article');
-    art.className = 'page';
-    const inner = document.createElement('div');
-    inner.className = 'page-inner';
+// attach
+const stage = qs('#stage');
+stage.addEventListener('touchstart', onDown, {passive:true});
+stage.addEventListener('touchmove',  onMove, {passive:true});
+stage.addEventListener('touchend',   onUp);
+stage.addEventListener('mousedown', onDown);
+window.addEventListener('mousemove', onMove);
+window.addEventListener('mouseup', onUp);
 
-    // chips
-    const chips = document.createElement('div');
-    chips.className = 'chips';
-    if (meta.date)  chips.innerHTML += `<span class="chip">Date: ${meta.date}</span>`;
-    if (meta.place) chips.innerHTML += `<span class="chip">Place: ${meta.place}</span>`;
-    inner.appendChild(chips);
+prevBtn.addEventListener('click', ()=>go(idx-1));
+nextBtn.addEventListener('click', ()=>go(idx+1));
 
-    // body
-    const content = document.createElement('div');
-    content.className = 'content';
-    // נפרק לפי פלייסהולדר של קו-כוכב
-    meta.body.split('@@STAR@@').forEach((chunk, idx) => {
-      if (idx>0){
-        const hr = document.createElement('div');
-        hr.className = 'star-hr';
-        hr.innerHTML = `<span class="star">★</span>`;
-        content.appendChild(hr);
-      }
-      const block = document.createElement('div');
-      block.innerHTML = chunk;          // כבר כולל <picture>/<img> מההחלפה
-      content.appendChild(block);
-    });
-
-    inner.appendChild(content);
-    art.appendChild(inner);
-    return art;
-  }
-
-  // --------- Swipe navigation ----------
-  let current = 0, pages = [];
-
-  function show(i){
-    if (!pages.length) return;
-    current = Math.max(0, Math.min(i, pages.length-1));
-    canvas.style.transform = `translateX(${-current*100}%)`;
-    pager.textContent = `${current+1}/${pages.length}`;
-    // רמז החלקה – רק בדף הראשון
-    hint.style.opacity = current===0 && pages.length>1 ? '1' : '0';
-  }
-
-  function bindSwipe(){
-    let startX=0, dx=0, touching=false;
-    const TH = 60; // threshold
-
-    canvas.addEventListener('touchstart', e=>{
-      touching=true; startX = e.touches[0].clientX; dx=0;
-    }, {passive:true});
-
-    canvas.addEventListener('touchmove', e=>{
-      if(!touching) return;
-      dx = e.touches[0].clientX - startX;
-      canvas.style.transition='none';
-      canvas.style.transform = `translateX(${(-current*100)+(dx/window.innerWidth*100)}%)`;
-    }, {passive:true});
-
-    canvas.addEventListener('touchend', ()=>{
-      canvas.style.transition='';
-      if (Math.abs(dx) > TH){
-        show( dx<0 ? current+1 : current-1 );
-      } else {
-        show(current);
-      }
-      touching=false; dx=0;
-    });
-  }
-
-  // --------- Boot ----------
-  (async function(){
-    try{
-      const res = await fetch(txtURL);
-      if(!res.ok) throw new Error('book.txt not found');
-      const raw = await res.text();
-
-      const parts = splitParts(raw);
-      pages = parts.map(p => extractMetaAndBody(p)).map(pageDOM);
-
-      // ננקה ונכניס DOM
-      canvas.innerHTML = '';
-      pages.forEach(p => canvas.appendChild(p));
-
-      // תצוגה ראשונית
-      bindSwipe();
-      show(0);
-    }catch(err){
-      canvas.innerHTML = `<div class="page"><div class="page-inner"><div class="content">Loading error: ${err.message}</div></div></div>`;
-      pager.textContent = '—';
-      console.error(err);
-    }
-  })();
-
-})();
+// init
+loadBook().catch(err=>{
+  track.innerHTML = `<div class="page"><div class="page-inner"><div class="content">Error: ${err.message}</div></div></div>`;
+  pages = [1]; updatePager();
+});
