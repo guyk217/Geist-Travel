@@ -1,5 +1,4 @@
-// --- DOM helpers ---
-const $ = (s, el = document) => el.querySelector(s);
+const $ = (s, el=document) => el.querySelector(s);
 const stage  = $('#stage');
 const track  = $('#track');
 const pager  = $('#pager');
@@ -13,30 +12,26 @@ const TXT_URL = `books/${slug}/book.txt`;
 const IMG_DIR = `books/${slug}/images/`;
 const IMG_EXTS = ['.jpg','.jpeg','.png','.webp'];
 
-// כמה שורות בעמוד (שנה כרצונך)
+// כמה שורות בעמוד
 const LINES_PER_PAGE = 20;
 
-let pages = [];
-let idx = 0;
-let PAGE_W = 0;
-
-function disable(btn, v){ btn.disabled = !!v; }
+let pages=[], idx=0, PAGE_W=0;
 
 // ---------- images ----------
 async function headExists(url){
-  try{ const r = await fetch(url, {method:'HEAD'}); return r.ok; }
-  catch{ return false; }
+  try { const r = await fetch(url, {method:'HEAD'}); return r.ok; }
+  catch { return false; }
 }
-async function resolveImg(num){
-  const base = IMG_DIR + `image-${num}`;
-  for(const ext of IMG_EXTS){
+async function resolveImg(n){
+  const base = IMG_DIR + `image-${n}`;
+  for (const ext of IMG_EXTS){
     const u = base + ext;
-    if(await headExists(u)) return `<img src="${u}" alt="image-${num}">`;
+    if (await headExists(u)) return `<img src="${u}" alt="image-${n}">`;
   }
-  return `<div class="pill">Missing image-${num}</div>`;
+  return `<div class="pill">Missing image-${n}</div>`;
 }
 
-// ---------- load & build ----------
+// ---------- load ----------
 async function loadBook(){
   let raw;
   try{
@@ -49,31 +44,22 @@ async function loadBook(){
   }
 
   // {image-N} -> <img>
-  const jobs = [];
-  raw = raw.replace(/\{image-(\d+)\}/g, (m,n)=>{
-    const ph = `@@IMG_${n}@@`;
-    jobs.push((async()=>({ph, html:await resolveImg(n)}))());
-    return ph;
-  });
-  const repl = await Promise.all(jobs);
-  repl.forEach(r => raw = raw.replaceAll(r.ph, r.html));
+  const jobs=[], ph = (n)=>`@@IMG_${n}@@`;
+  raw = raw.replace(/\{image-(\d+)\}/g, (m,n)=>{ jobs.push((async()=>({k:ph(n), v:await resolveImg(n)}))()); return ph(n); });
+  for (const {k,v} of await Promise.all(jobs)) raw = raw.replaceAll(k, v);
 
-  // כוכביות -> קו מפריד
+  // ****** => קו מפריד
   raw = raw.replace(/\r?\n\s*\*{2,}\s*\r?\n/g, '\n<hr class="separator">\n');
 
   // חלוקה לפי מספר שורות קבוע
   const lines = raw.split(/\r?\n/);
-  let buf = [];
-  pages = [];
+  let buf=[]; pages=[];
   for(const ln of lines){
     buf.push(ln);
-    if(buf.length >= LINES_PER_PAGE){
-      pages.push(buf.join('\n'));
-      buf = [];
-    }
+    if(buf.length>=LINES_PER_PAGE){ pages.push(buf.join('\n')); buf=[]; }
   }
   if(buf.length) pages.push(buf.join('\n'));
-  if(!pages.length) pages = [raw.trim()];
+  if(!pages.length) pages=[raw.trim()];
 
   buildSlides();
   layout();
@@ -82,56 +68,94 @@ async function loadBook(){
 
 function showSingle(html){
   track.innerHTML = `<div class="page"><article class="page-inner"><div class="content">${html}</div></article></div>`;
-  pages = [html]; idx = 0;
-  layout(); go(0, true);
+  pages=[html]; idx=0; layout(); go(0, true);
 }
 
 function buildSlides(){
-  track.innerHTML = '';
+  track.innerHTML='';
   pages.forEach(part=>{
-    const p = document.createElement('div');
-    p.className = 'page';
-    p.innerHTML = `<article class="page-inner"><div class="content">${part}</div></article>`;
+    const p=document.createElement('div');
+    p.className='page';
+    p.innerHTML=`<article class="page-inner"><div class="content">${part}</div></article>`;
     track.appendChild(p);
   });
 }
 
-// ---------- layout & nav ----------
+// ---------- layout / nav ----------
 function layout(){
-  PAGE_W = Math.floor(stage.clientWidth);
-  [...track.children].forEach(p => p.style.width = PAGE_W + 'px');
-  track.style.width = (PAGE_W * pages.length) + 'px';
-  snap(true);
-  updUI();
+  // width via BCR מונע “גליץ’ פס גלילה” בספארי
+  PAGE_W = Math.round(stage.getBoundingClientRect().width);
+  [...track.children].forEach(p=>p.style.width = PAGE_W+'px');
+  track.style.width = (PAGE_W*pages.length)+'px';
+  snap(true); // align
+  updateUI();
 }
 function snap(instant=false){
   track.style.transition = instant ? 'none' : 'transform .35s ease';
-  track.style.transform  = `translateX(${-idx*PAGE_W}px)`;
+  // translate3d = GPU, מדוייק יותר
+  track.style.transform  = `translate3d(${-idx*PAGE_W}px,0,0)`;
   if(instant) requestAnimationFrame(()=>track.style.transition='transform .35s ease');
 }
 function go(i, instant=false){
   idx = Math.max(0, Math.min(pages.length-1, i));
-  snap(instant); updUI();
+  snap(instant); updateUI();
 }
-function updUI(){
+function updateUI(){
   pager.textContent = `${idx+1}/${pages.length}`;
-  disable(prevBt, idx===0);
-  disable(nextBt, idx===pages.length-1);
+  prevBt.disabled = (idx===0);
+  nextBt.disabled = (idx===pages.length-1);
 }
 
-// ---------- swipe ----------
-let drag=false, sx=0, cx=0;
-function down(e){ drag=true; sx=(e.touches?e.touches[0].clientX:e.clientX); cx=sx; track.style.transition='none'; }
-function move(e){ if(!drag) return; cx=(e.touches?e.touches[0].clientX:e.clientX); const dx=cx-sx; track.style.transform=`translateX(${(-idx*PAGE_W)+dx}px)`; }
-function up(){ if(!drag) return; drag=false; const dx=cx-sx; const TH=Math.min(140, PAGE_W*0.18); if(dx<-TH) go(idx+1); else if(dx>TH) go(idx-1); else snap(); }
+// ---------- swipe (Pointer Events עם סף+מהירות) ----------
+let dragging=false, sx=0, sy=0, cx=0, cy=0, lastT=0, lastX=0, velocity=0;
 
-stage.addEventListener('touchstart', down, {passive:true});
-stage.addEventListener('touchmove',  move, {passive:true});
-stage.addEventListener('touchend',   up);
-stage.addEventListener('mousedown',  down);
-window.addEventListener('mousemove', move);
-window.addEventListener('mouseup',   up);
-window.addEventListener('resize',    layout);
+function onPointerDown(e){
+  // לא להתחיל דראג אם לוחצים על כפתור
+  if (e.target.closest('button')) return;
+  dragging=true;
+  stage.setPointerCapture(e.pointerId);
+  sx=lastX=cx=e.clientX; sy=cy=e.clientY;
+  lastT=e.timeStamp; velocity=0;
+  track.style.transition='none';
+  document.body.classList.add('noSelect');
+}
+function onPointerMove(e){
+  if(!dragging) return;
+  cx=e.clientX; cy=e.clientY;
+
+  // אם הגרירה אנכית יותר – תן לגלילה טבעית
+  if (Math.abs(cy-sy) > Math.abs(cx-sx) + 6) { onPointerUp(e, true); return; }
+
+  const dx=cx-sx;
+  const now=e.timeStamp;
+  const dt=Math.max(1, now-lastT);
+  velocity = 0.8*velocity + 0.2*((cx-lastX)/dt); // px/ms
+  lastT=now; lastX=cx;
+
+  const base = -idx*PAGE_W;
+  track.style.transform = `translate3d(${base+dx}px,0,0)`;
+}
+function onPointerUp(e, canceled=false){
+  if(!dragging) return;
+  dragging=false;
+  document.body.classList.remove('noSelect');
+
+  if (canceled){ snap(); return; }
+
+  const dx=cx-sx;
+  const TH = Math.min(140, PAGE_W*0.18);
+  const speed = velocity*1000; // px/s
+
+  if (dx < -TH || speed < -500) go(idx+1);
+  else if (dx > TH || speed >  500) go(idx-1);
+  else snap();
+}
+
+stage.addEventListener('pointerdown', onPointerDown);
+stage.addEventListener('pointermove',  onPointerMove);
+stage.addEventListener('pointerup',    onPointerUp);
+stage.addEventListener('pointercancel',e=>onPointerUp(e,true));
+window.addEventListener('resize', layout);
 
 prevBt.addEventListener('click', ()=>go(idx-1));
 nextBt.addEventListener('click', ()=>go(idx+1));
