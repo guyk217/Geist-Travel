@@ -65,11 +65,21 @@ function escapeHTML(s){
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function textToHTML(text){
-  return text.split(/\r?\n/).map(l=>{
-    if(/^\*{6,}\s*$/.test(l)) return '<hr class="separator">';
-    if(/^\s*$/.test(l)) return '<br>';
-    return escapeHTML(l);
-  }).join('\n');
+  // שומרים <img ...> כמו שהוא, ואת השורות האחרות ממירים ל-HTML
+  return text
+    .split(/(<img[^>]*>)/gi)       // חותכים כך שהתמונות נשמרות כטוקן נפרד
+    .map(part=>{
+      if (!part) return '';
+      if (/^<img/i.test(part)) return part; // אל תיגעו בתמונה
+
+      // עבור טקסט רגיל: הפוך ****** ל-hr, שורות ריקות ל-<br>, והשאר escape
+      return part.split(/\r?\n/).map(line=>{
+        if (/^\*{6,}\s*$/.test(line)) return '<hr class="separator">';
+        if (/^\s*$/.test(line))       return '<br>';
+        return escapeHTML(line);
+      }).join('\n');
+    })
+    .join('');
 }
 
 // ---- עימוד לפי “שורות” ----
