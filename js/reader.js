@@ -1,200 +1,256 @@
-/* Reader – עיצוב המחברת הישן, רק עובד.
-   טוען books/<slug>/book.txt, מחליף {image-N}, הופך ****** ל-<hr>,
-   יוצר "טבליות" Place/Date אם יש בתחילת קטע,
-   ומחלק לעמודים אוטומטית לפי אורך טקסט (לא לפי ******).
-*/
+// Reader – loads books/<slug>/book.txt , injects images, draws separators,
+// paginates by actual viewport height, supports arrows + swipe.
 
-const qs = new URLSearchParams(location.search);
-const slug = qs.get('book'); // למשל europe-roots-1993
-const TXT_URL = slug ? `books/${slug}/book.txt` : null;
-const IMG_DIR = slug ? `books/${slug}/images/` : `books/images/`;
-const IMG_EXTS = ['.jpg','.jpeg','.png','.webp','.JPG','.PNG'];
+const EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
 
-const track = document.getElementById('track');
-const counter = document.getElementById('counter');
-const prevBtn = document.getElementById('prevBtn');
-const nextBtn = document.getElementById('nextBtn');
-
-let pages = [];
-let pageIndex = 0;
-
-// ------- helpers -------
-async function headExists(url){
-  try{
-    const r = await fetch(url, { method:'HEAD' });
-    return r.ok;
-  }catch(e){ return false; }
+function qs(name) {
+  const m = new URLSearchParams(location.search).get(name);
+  return m ? decodeURIComponent(m) : null;
 }
-async function findImageSrc(base){
-  for (const ext of IMG_EXTS){
-    const url = base + ext;
-    if (await headExists(url)) return url;
+
+function setCounter(i, total) {
+  document.getElementById('counter').textContent = `${i + 1}/${total}`;
+  document.getElementById('prev').disabled = (i === 0);
+  document.getElementById('next').disabled = (i === total - 1);
+}
+
+async function fetchText(url) {
+  const res = await fetch(url + `?v=${Date.now()}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.text();
+}
+
+async function probeImage(srcBase) {
+  // try all extensions, resolve first that loads
+  for (const ext of EXTENSIONS) {
+    const src = `${srcBase}${ext}`;
+    const ok = await new Promise(r => {
+      const im = new Image();
+      im.onload = () => r(true);
+      im.onerror = () => r(false);
+      im.src = src;
+    });
+    if (ok) return src;
   }
   return null;
 }
-function escapeHtml(s){
-  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-function pillsFromHead(lines){
-  // מחפש שורות פתיחה Place:/Date: ומסיר אותן מהטקסט
-  let place=null, date=null;
-  while(lines.length){
-    const ln = lines[0].trim();
-    if (/^Place\s*:/.test(ln)) { place = ln.replace(/^Place\s*:\s*/,'').trim(); lines.shift(); continue; }
-    if (/^Date\s*:/.test(ln))  { date  = ln.replace(/^Date\s*:\s*/,'').trim();  lines.shift(); continue; }
-    break;
-  }
-  let html = '';
-  if(place || date){
-    html += `<div class="meta">`;
-    if(date)  html += `<span class="pill">Date: ${escapeHtml(date)}</span>`;
-    if(place) html += `<span class="pill">Place: ${escapeHtml(place)}</span>`;
-    html += `</div>`;
-  }
-  return { html, rest: lines.join('\n') };
-}
 
-function splitIntoPages(html){
-  // חותך לפי פסקאות כדי לא לשבור מילים, עם יעד אורך דינמי למובייל/דסקטופ
-  const target = (innerWidth <= 420) ? 1400 : (innerWidth <= 900 ? 2000 : 2400);
-  // נפרק לפסקאות (כבר יש <hr> ו<img> וכן הלאה)
-  const blocks = html.split(/\n{2,}/).map(s=>s.trim()).filter(Boolean);
+async function hydrateImages(raw, imgDir) {
+  const jobs = [];
+  const withPh = raw.replace(/\{image-(\d+)\}/g, (m, num) => {
+    const ph = `@@IMG_${num}@@`;
+    jobs.push((async () => {
+      const src = await probeImage(`${imgDir}/image-${num}`);
+      const html = src
+        ? `<img src="${src}" alt="image-${num}">`
+        : `<div class="pill">Missing image ${num}</div>`;
+      return { ph, html };
+    })());
+    return ph;
+  });
 
-  let current = '';
-  const out = [];
-  for(const b of blocks){
-    if ((current + '\n\n' + b).length > target && current){
-      out.push(current);
-      current = b;
-    }else{
-      current = current ? current + '\n\n' + b : b;
-    }
-  }
-  if(current) out.push(current);
+  const resolved = await Promise.all(jobs);
+  let out = withPh;
+  for (const { ph, html } of resolved) out = out.replaceAll(ph, html);
   return out;
 }
 
-function renderPages(pagesHtml){
-  track.innerHTML = '';
-  pages = pagesHtml;
+function toHTML(text) {
+  // turn ****** lines to separators, keep paragraphs
+  const lines = text.split(/\r?\n/);
+  const html = lines.map(l => {
+    if (/^\*{6,}\s*$/.test(l)) return '<hr class="separator">';
+    if (/^\s*$/.test(l)) return '<br>';
+    return l
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }).join('\n');
+  return html;
+}
 
-  pages.forEach((html, i)=>{
+/** paginate by height: measure text using an offscreen page that mimics layout */
+function paginate(html) {
+  const track = document.getElementById('track');
+  track.innerHTML = '';
+
+  // temp measurer that matches real layout
+  const tempPage = document.createElement('div');
+  tempPage.className = 'page';
+  const card = document.createElement('div');
+  card.className = 'page-card';
+  const inner = document.createElement('div');
+  inner.className = 'page-inner';
+  card.appendChild(inner);
+  tempPage.appendChild(card);
+  tempPage.style.visibility = 'hidden';
+  document.body.appendChild(tempPage);
+
+  const maxH = card.clientHeight; // usable height for inner content
+
+  // tokenization: don't split <img> or <hr>
+  const tokens = [];
+  html.split(/(<img[^>]+>|<hr class="separator">)/g).forEach(part => {
+    if (!part) return;
+    if (part.startsWith('<img') || part.startsWith('<hr')) tokens.push({ type: 'html', html: part });
+    else tokens.push({ type: 'text', text: part });
+  });
+
+  const pages = [];
+  let curHTML = '';
+
+  const measure = (h) => {
+    inner.innerHTML = h;
+    return inner.scrollHeight;
+  };
+
+  const flush = () => {
+    if (curHTML.trim()) {
+      pages.push(curHTML);
+      curHTML = '';
+    }
+  };
+
+  for (const tk of tokens) {
+    if (tk.type === 'html') {
+      const tryHTML = curHTML + tk.html;
+      if (measure(tryHTML) <= maxH) {
+        curHTML = tryHTML;
+      } else {
+        flush();
+        if (measure(tk.html) > maxH) {
+          // oversize block (very tall image) – place alone
+          pages.push(tk.html);
+        } else {
+          curHTML = tk.html;
+        }
+      }
+    } else {
+      // text: add piece by piece while it fits
+      const chunks = tk.text.split(/(\s+)/); // keep spaces
+      for (let i = 0; i < chunks.length; i++) {
+        const next = curHTML + chunks[i];
+        if (measure(next) <= maxH) {
+          curHTML = next;
+        } else {
+          flush();
+          curHTML = chunks[i].trimStart();
+          if (measure(curHTML) > maxH) {
+            // pathological very long token – hard cut
+            let cut = chunks[i];
+            while (cut && measure(cut) > maxH) {
+              cut = cut.slice(0, Math.max(1, Math.floor(cut.length * 0.9)));
+            }
+            if (cut) pages.push(cut);
+            curHTML = chunks[i].slice(cut.length);
+          }
+        }
+      }
+    }
+  }
+  flush();
+
+  // build DOM
+  pages.forEach(h => {
     const p = document.createElement('div');
     p.className = 'page';
+    const c = document.createElement('div');
+    c.className = 'page-card';
     const inner = document.createElement('div');
     inner.className = 'page-inner';
-    inner.innerHTML = html;
-    p.appendChild(inner);
+    inner.innerHTML = h;
+    c.appendChild(inner);
+    p.appendChild(c);
     track.appendChild(p);
   });
 
-  pageIndex = 0;
-  updateUI();
+  tempPage.remove();
+  return pages.length;
 }
 
-function updateUI(){
-  const total = pages.length || 1;
-  counter.textContent = `${pageIndex+1}/${total}`;
-  const x = -pageIndex * window.innerWidth;
-  track.style.transform = `translate3d(${x}px,0,0)`;
-
-  prevBtn.disabled = (pageIndex === 0);
-  nextBtn.disabled = (pageIndex >= total-1);
-}
-
-function go(dir){
-  const total = pages.length || 1;
-  pageIndex = Math.min(Math.max(pageIndex + dir, 0), total-1);
-  updateUI();
-}
-
-// swipe
-(function attachSwipe(){
-  let sx=0, dx=0, dragging=false;
-  const stage = document.getElementById('stage');
-
-  stage.addEventListener('touchstart', e=>{
-    if(!e.touches[0]) return;
-    dragging=true; sx=e.touches[0].clientX; dx=0;
-  }, {passive:true});
-
-  stage.addEventListener('touchmove', e=>{
-    if(!dragging||!e.touches[0]) return;
-    dx = e.touches[0].clientX - sx;
-  }, {passive:true});
-
-  stage.addEventListener('touchend', ()=>{
-    if(!dragging) return;
-    dragging=false;
-    if (Math.abs(dx) > 60){
-      go(dx<0 ? +1 : -1);
+function enableSwipe(cbLeft, cbRight) {
+  let x0 = null, y0 = null, t0 = 0;
+  const minDx = 40, maxDy = 60, maxT = 600;
+  const el = document.getElementById('stage');
+  el.addEventListener('touchstart', e => {
+    const t = e.touches[0];
+    x0 = t.clientX; y0 = t.clientY; t0 = Date.now();
+  }, { passive: true });
+  el.addEventListener('touchend', e => {
+    if (x0 == null) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - x0;
+    const dy = Math.abs(t.clientY - y0);
+    const dt = Date.now() - t0;
+    x0 = null;
+    if (dy < maxDy && dt < maxT && Math.abs(dx) > minDx) {
+      if (dx < 0) cbRight(); else cbLeft();
     }
-  });
-})();
+  }, { passive: true });
+}
 
-prevBtn.addEventListener('click', ()=>go(-1));
-nextBtn.addEventListener('click', ()=>go(+1));
-window.addEventListener('resize', ()=>updateUI());
+(async function main() {
+  const slug = qs('book');
+  const track = document.getElementById('track');
 
-// ------- boot -------
-(async function init(){
-  try{
-    if(!TXT_URL) throw new Error('Missing book slug');
-    const res = await fetch(TXT_URL);
-    if(!res.ok) throw new Error('Text file not found');
-    let raw = await res.text();
+  if (!slug) {
+    track.innerHTML = `<div class="error">Missing ?book= slug</div>`;
+    return;
+  }
 
-    // {image-N} -> <img>
-    const jobs = [];
-    raw = raw.replace(/\{image-(\d+)\}/g, (m, num)=>{
-      const ph = `@@IMG_${num}@@`;
-      jobs.push((async ()=>{
-        const base = IMG_DIR + `image-${num}`;
-        const src  = await findImageSrc(base);
-        return { ph, html: src ? `<img src="${src}" alt="image-${num}">` :
-                                 `<div class="pill">Missing image-${num}</div>` };
-      })());
-      return ph;
+  const txtURL = `books/${slug}/book.txt`;
+  const imgDir = `books/${slug}/images`;
+
+  try {
+    let raw = await fetchText(txtURL);
+    if (!raw || !raw.trim()) {
+      track.innerHTML = `<div class="error">Empty book.txt</div>`;
+      return;
+    }
+
+    // Replace {image-N} and turn ****** to <hr>
+    raw = await hydrateImages(raw, imgDir);
+
+    // Extract leading Place/Date (optional – shown as pills on first page)
+    let place = null, date = null;
+    raw = raw.replace(/^(Place:\s*)(.+)\s*\r?\n/i, (_, p, v) => { place = v.trim(); return ''; });
+    raw = raw.replace(/^(Date:\s*)(.+)\s*\r?\n/i,  (_, p, v) => { date  = v.trim(); return ''; });
+
+    let html = toHTML(raw);
+
+    // Insert pills at very top (first page)
+    const pills = [];
+    if (date)  pills.push(`<span class="pill">Date: ${date}</span>`);
+    if (place) pills.push(`<span class="pill">Place: ${place}</span>`);
+    if (pills.length) html = `<div class="meta-pills">${pills.join(' ')}</div>` + html;
+
+    // Paginate & render
+    let total = paginate(html);
+    let index = 0;
+    setCounter(index, total);
+
+    const trackEl = document.getElementById('track');
+    function go(i) {
+      index = Math.max(0, Math.min(total - 1, i));
+      const x = -index * trackEl.clientWidth;
+      trackEl.style.transition = 'transform 260ms ease';
+      trackEl.style.transform = `translate3d(${x}px,0,0)`;
+      setCounter(index, total);
+    }
+
+    document.getElementById('prev').onclick = () => go(index - 1);
+    document.getElementById('next').onclick = () => go(index + 1);
+    enableSwipe(() => go(index - 1), () => go(index + 1));
+
+    // Reflow on resize/rotation
+    addEventListener('resize', () => {
+      const cur = index;
+      total = paginate(html);
+      go(Math.min(cur, total - 1));
     });
-    const results = await Promise.all(jobs);
-    let hydrated = raw;
-    for (const r of results){ hydrated = hydrated.replaceAll(r.ph, r.html); }
 
-    // הפוך ****** לקו מפריד
-    hydrated = hydrated.replace(/^\*{6,}\s*$/gm, '<hr class="separator">');
-
-    // טבליות Place/Date בתחילת הספר (אם יש)
-    const lines = hydrated.split(/\r?\n/);
-    const { html: metaHtml, rest } = pillsFromHead(lines);
-
-    // ניקוי כפלי רווחים ועיבוד שורות
-    let bodyHtml = rest
-      .replace(/\r/g,'')
-      // שמירה על שבירת שורות לפסקאות
-      .split(/\n{2,}/).map(p => p.trim())
-      .map(p => {
-        // לא להסב שוב תגיות אמיתיות
-        if (p.startsWith('<img ') || p.startsWith('<hr ')) return p;
-        return p.replace(/\n/g,'<br>');
-      })
-      .join('\n\n');
-
-    const fullHtml = metaHtml + bodyHtml;
-
-    // חלוקה לעמודים לפי אורך יעד (דינמי)
-    const pagesHtml = splitIntoPages(fullHtml);
-    renderPages(pagesHtml);
-
-  }catch(err){
+  } catch (err) {
+    track.innerHTML = `<div class="error">Failed to load book.txt (${txtURL}).<br>${String(err)}</div>`;
     console.error(err);
-    // fallback: דף ריק אלגנטי
-    track.innerHTML = '';
-    const p = document.createElement('div');
-    p.className = 'page';
-    p.innerHTML = `<div class="page-inner"><div class="pill">Error loading text.</div></div>`;
-    track.appendChild(p);
-    pages = ['err'];
-    pageIndex = 0;
-    updateUI();
   }
 })();
