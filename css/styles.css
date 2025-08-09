@@ -188,7 +188,33 @@ hr.separator{
 
 /* חיצים מושבתים */
 .nav button[disabled]{ opacity:.35; pointer-events:none; }
-
+/* ===== Loader עם רקע מחברת ===== */
+#loader{
+  position:fixed; inset:0; z-index:9999;
+  display:none; place-items:center;
+  background:
+    radial-gradient(ellipse at top, rgba(255,255,255,.55), transparent 60%),
+    repeating-linear-gradient(0deg, rgba(0,0,0,.02), rgba(0,0,0,.02) 2px, transparent 2px, transparent 36px),
+    var(--paper, #f7f1e3);
+}
+#loader .loader-card{
+  width:min(86vw,520px);
+  background:#ffffffcc;
+  border:1px solid var(--border,#eadfcd);
+  border-radius:18px;
+  box-shadow:0 14px 36px rgba(0,0,0,.14);
+  padding:22px 18px;
+  text-align:center;
+}
+#loader .spinner{
+  width:34px; height:34px; margin:0 auto 10px;
+  border-radius:50%;
+  border:3px solid #d8c9b2;
+  border-top-color:#6e5a46;
+  animation:spin 0.9s linear infinite;
+}
+#loader .loader-text{ color:#3b2f22; font-weight:600; }
+@keyframes spin{ to{ transform:rotate(360deg) } }
 /* פוטר קטן */
 .home-foot{ padding:16px; text-align:center; opacity:.75; }
 .small-link{ color:#2b2622; text-decoration:none; border-bottom:1px dotted #2b2622; }
