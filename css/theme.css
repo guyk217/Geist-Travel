@@ -1,0 +1,142 @@
+:root{
+  --paper:#f4ecd9;
+  --line:#e6dcc7;
+  --ink:#2f2720;
+  --sep:#d8cdb7;
+  --chip:#3f3933;
+  --chipText:#fff;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  color:var(--ink);
+  font-family:'Assistant',system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+  -webkit-font-smoothing:antialiased;
+  text-rendering:optimizeLegibility;
+}
+
+/* מחברת */
+.notebook{
+  background:
+    linear-gradient(transparent 31px, var(--line) 32px) repeat-y,
+    var(--paper);
+  background-size: 100% 32px, auto;
+}
+
+/* -------- Home ---------- */
+.home-hero{
+  text-align:center;
+  padding: clamp(18px,5vw,28px) 12px 6px;
+  border-bottom:1px solid var(--sep);
+}
+.home-title{
+  margin:0;
+  font-family:'Amatic SC', cursive;
+  font-size: clamp(40px,10vw,78px);
+  letter-spacing:1px;
+  color:#2f261e;
+  text-shadow:0 1px 0 #fff8;
+}
+.en{direction:ltr}
+.home-sub{
+  margin:.4rem 0 0;
+  opacity:.85;
+  font-weight:400;
+}
+
+.books-list{
+  display:flex; flex-direction:column; gap:14px;
+  padding: 14px;
+  max-width:1000px; margin:0 auto;
+}
+
+/* כרטיס ספר – תמונה מימין, טקסט משמאל */
+.book-card{
+  display:flex; flex-direction:row-reverse; align-items:center; gap:14px;
+  background:rgba(255,255,255,.55);
+  border:1px solid #00000010;
+  border-radius:18px;
+  padding:12px;
+  box-shadow:0 10px 24px #00000012, inset 0 0 0 1px #ffffff80;
+}
+.book-thumb{ flex:0 0 120px; display:block }
+.book-thumb img{
+  width:120px; height:120px; object-fit:cover; display:block;
+  border-radius:12px; box-shadow:0 8px 18px #00000018;
+}
+.book-info{ flex:1 1 auto; min-width:0 }
+.book-title{ font-weight:600; font-size:1.15rem; margin:.1rem 0 }
+.book-sub{ opacity:.7; margin-bottom:.25rem }
+.book-desc{ margin:.2rem 0 .5rem; opacity:.9 }
+.book-open{
+  text-decoration:none; background:var(--chip); color:var(--chipText);
+  padding:.4rem .9rem; border-radius:999px; font-size:.95rem;
+}
+@media (max-width:560px){
+  .book-card{ flex-direction:column; align-items:stretch; }
+  .book-thumb{ align-self:flex-end }
+}
+
+/* -------- Reader ---------- */
+.bar{
+  position:sticky; top:0; z-index:10;
+  display:flex; align-items:center; gap:10px;
+  padding:10px 12px;
+  background:linear-gradient(#fff8, #fff0), transparent;
+  backdrop-filter: blur(6px);
+  border-bottom:1px solid var(--sep);
+}
+.back{
+  text-decoration:none; color:#fff;
+  background:#3e3a35; padding:.45rem .8rem; border-radius:999px;
+}
+.book-title{ font-weight:600 }
+.book-sub{ opacity:.75; font-size:.92rem }
+.page-count{ margin-inline-start:auto; opacity:.85 }
+
+.pager{
+  height: calc(100svh - 62px);
+  overflow:hidden; /* אנחנו מחליקים עמודים */
+  position:relative;
+}
+.page-track{
+  display:flex; height:100%; width:100%;
+  transition: transform .35s ease;
+}
+.page{
+  flex:0 0 100%;
+  height:100%;
+  overflow:auto;
+  padding:14px;
+  scroll-behavior:smooth;
+}
+
+/* תוכן עמוד */
+.meta{ display:flex; flex-wrap:wrap; gap:8px; margin:2px 0 10px }
+.pill{
+  display:inline-flex; align-items:center; gap:6px;
+  background:#35302a; color:#fff; border-radius:999px;
+  padding:.35rem .7rem; font-size:.9rem;
+}
+.body{ line-height:1.6; font-size:1.02rem }
+.body img{
+  display:block; max-width:100%; height:auto; margin:10px auto;
+  border-radius:10px; box-shadow:0 8px 20px #00000018;
+}
+.star-hr{ display:flex; align-items:center; justify-content:center; margin:12px 0 }
+.star-hr::before, .star-hr::after{
+  content:""; height:1px; background:var(--sep); flex:1
+}
+.star-hr .star{ margin:0 8px; font-size:1rem; opacity:.8 }
+
+/* מסמן כותרת שקופה מאחור (הווייב של ההתחלה) */
+.reader .book-head:before{
+  content: attr(data-title);
+  position:absolute; inset:auto 0 0 0; transform:translateY(-120%);
+  text-align:center; pointer-events:none;
+  font-family:'Amatic SC', cursive; font-size:56px; opacity:.05;
+}
+
+.hidden{display:none}
