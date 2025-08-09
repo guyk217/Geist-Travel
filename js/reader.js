@@ -64,15 +64,14 @@ async function hydrateImages(raw, imgDir){
 function escapeHTML(s){
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+
 function textToHTML(text){
-  // שומרים <img ...> כמו שהוא, ואת השורות האחרות ממירים ל-HTML
+  // שומרים <img …> כמו שהוא, וממירים רק טקסט
   return text
-    .split(/(<img[^>]*>)/gi)       // חותכים כך שהתמונות נשמרות כטוקן נפרד
+    .split(/(<img[^>]*>)/gi)
     .map(part=>{
       if (!part) return '';
-      if (/^<img/i.test(part)) return part; // אל תיגעו בתמונה
-
-      // עבור טקסט רגיל: הפוך ****** ל-hr, שורות ריקות ל-<br>, והשאר escape
+      if (/^<img/i.test(part)) return part;          // אל תיגע בתמונה
       return part.split(/\r?\n/).map(line=>{
         if (/^\*{6,}\s*$/.test(line)) return '<hr class="separator">';
         if (/^\s*$/.test(line))       return '<br>';
@@ -81,7 +80,6 @@ function textToHTML(text){
     })
     .join('');
 }
-
 // ---- עימוד לפי “שורות” ----
 function tokenize(html){
   const tokens = [];
