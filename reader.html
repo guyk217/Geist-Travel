@@ -1,26 +1,238 @@
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Reader</title>
-  <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Assistant:wght@300;400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/theme.css">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Rubik:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --paper:#F5EBDD; --lines:#E9DFC9; --ink:#2b2b2b; --muted:#6b5b4d;
+      --pill:#2f2c2a; --shadow:0 10px 22px rgba(0,0,0,.08),0 2px 6px rgba(0,0,0,.06);
+      --radius:18px;
+    }
+    html,body{height:100%}
+    body{
+      margin:0; color:var(--ink);
+      background:
+        linear-gradient(to bottom, transparent 39px, var(--lines) 40px) repeat-y,
+        var(--paper);
+      background-size:100% 40px, 100% 40px;
+      font-family:"Rubik","Heebo",-apple-system,system-ui,Segoe UI,Roboto,Arial,"Noto Sans Hebrew","Assistant",sans-serif;
+      -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+      overflow:hidden; /* דפדוף מסך-מלא */
+    }
+    .topbar{
+      position:fixed; inset-inline:12px; inset-block-start:10px;
+      display:flex; align-items:center; gap:12px; z-index:10;
+      color:#4a4037;
+    }
+    .back{
+      margin-inline-start:auto;
+      background:var(--pill); color:#fff; border:none; border-radius:22px;
+      padding:.5em 1em; font-weight:600; box-shadow:var(--shadow);
+      cursor:pointer;
+    }
+    .counter{ font-weight:600 }
+    .stage{
+      position:absolute; inset:0; display:flex; align-items:stretch; touch-action:pan-y;
+    }
+    .page{
+      flex:0 0 100%; padding:90px clamp(16px,5vw,40px) 100px;
+      overflow:auto;
+    }
+    .page .meta{ display:flex; gap:10px; flex-wrap:wrap; margin:0 0 14px }
+    .pill{ background:var(--pill); color:#fff; padding:.35em .8em; border-radius:999px; font-size:.9rem }
+    .body{ line-height:1.75; font-size:1.08rem; }
+    .body img{
+      max-width:100%; height:auto; border-radius:14px; display:block;
+      margin:14px auto; box-shadow:var(--shadow); background:#fff;
+    }
+    .star-hr{ display:flex; justify-content:center; margin:12px 0 }
+    .star-hr .star{ opacity:.55 }
+    .hint{ position:fixed; inset-inline:0; inset-block-end:10px; text-align:center; color:#7c6f62; font-size:.92rem }
+  </style>
 </head>
-<body class="notebook reader">
+<body>
+  <div class="topbar">
+    <div class="counter" id="counter">1/1</div>
+    <button class="back" onclick="history.back()">חזרה</button>
+  </div>
 
-  <header class="bar">
-    <a class="back" href="index.html" aria-label="חזרה">חזרה</a>
-    <div class="book-head">
-      <div id="bookTitle" class="book-title"></div>
-      <div id="bookSub" class="book-sub"></div>
-    </div>
-    <div id="pageCount" class="page-count">1/1</div>
-  </header>
+  <div id="stage" class="stage" aria-live="polite"></div>
+  <div class="hint">החלקה שמאלה/ימינה לדפדוף</div>
 
-  <!-- נתונים דינמיים -->
-  <main id="pager" class="pager" aria-live="polite"></main>
+<script>
+(function(){
+  const qs = new URLSearchParams(location.search);
+  const slug = qs.get('book');
+  const stage = document.getElementById('stage');
+  const counter = document.getElementById('counter');
 
-  <script src="js/reader.js"></script>
+  if(!slug){
+    stage.innerHTML = msg('לא התקבל מזהה ספר (?book=)');
+    return;
+  }
+
+  const TXT_URL = `books/${slug}/book.txt`;
+  const IMG_DIR = `books/${slug}/images/`;
+  const IMG_EXTS = ['.webp','.jpg','.jpeg','.png'];
+
+  const headExists = async url => {
+    try{ const r = await fetch(url,{method:'HEAD'}); return r.ok }catch(e){ return false }
+  };
+  const findImageSrc = async base => {
+    for(const ext of IMG_EXTS){
+      const url = base + ext;
+      if(await headExists(url)) return url;
+    }
+    return null;
+  };
+
+  function msg(t){
+    return `<div class="page"><div class="body">${t}</div></div>`;
+  }
+
+  async function load(){
+    try{
+      const res = await fetch(TXT_URL,{cache:'no-store'});
+      if(!res.ok) throw new Error('Text file not found');
+      let raw = await res.text();
+
+      // החלפת image placeholders
+      const jobs = [];
+      raw = raw.replace(/\{image-(\d+)\}/g,(m,n)=>{
+        const ph = `@@IMG_${n}@@`;
+        jobs.push((async()=>{
+          const src = await findImageSrc(IMG_DIR + `image-${n}`);
+          return {ph, html: src ? `<img src="${src}" alt="image-${n}">`
+                                : `<div class="pill">Missing image-${n}</div>`};
+        })());
+        return ph;
+      });
+      const repl = await Promise.all(jobs);
+      for(const r of repl) raw = raw.replaceAll(r.ph,r.html);
+
+      // פיצול לעמודים לפי ******** (8+)
+      const parts = raw.split(/\r?\n\*{8,}\r?\n/).map(s=>s.trim()).filter(Boolean);
+      if(!parts.length){
+        stage.innerHTML = msg('לא נמצאו עמודים (צריך שורת ******** כמפריד).');
+        return;
+      }
+
+      // בניית DOM לכל עמוד
+      stage.innerHTML = '';
+      parts.forEach(p=>{
+        let place=null, date=null, body=p;
+
+        // משוך Place/Date רק אם בשורות הראשונות
+        body = body.replace(/^(?:Place:\s*)(.+)\s*\r?\n/i,(m,val)=>{ place = val.trim(); return '' });
+        body = body.replace(/^(?:Date:\s*)(.+)\s*\r?\n/i,(m,val)=>{ date  = val.trim(); return '' });
+
+        // כוכבית בודדת -> מפריד
+        body = body.replace(/\r?\n\*\r?\n/g,'\n@@STAR@@\n').trim();
+
+        const page = document.createElement('div');
+        page.className = 'page';
+
+        if(place || date){
+          const meta = document.createElement('div');
+          meta.className = 'meta';
+          if(place){ const s=document.createElement('span'); s.className='pill'; s.textContent=`Place: ${place}`; meta.appendChild(s); }
+          if(date){  const s=document.createElement('span'); s.className='pill'; s.textContent=`Date: ${date}`;  meta.appendChild(s); }
+          page.appendChild(meta);
+        }
+
+        const bodyDiv = document.createElement('div');
+        bodyDiv.className = 'body';
+
+        const chunks = body.split('@@STAR@@');
+        chunks.forEach((chunk,i)=>{
+          if(i>0){
+            const hr = document.createElement('div');
+            hr.className = 'star-hr'; hr.innerHTML = '<span class="star">★</span>';
+            bodyDiv.appendChild(hr);
+          }
+          const span = document.createElement('span');
+          span.innerHTML = chunk;
+          bodyDiv.appendChild(span);
+        });
+
+        page.appendChild(bodyDiv);
+        stage.appendChild(page);
+      });
+
+      // הפעלה: דפדוף
+      setupPager(parts.length);
+
+    }catch(err){
+      console.error(err);
+      stage.innerHTML = msg('שגיאה בטעינת הספר.');
+    }
+  }
+
+  function setupPager(total){
+    let idx = 0; update();
+
+    // גרירה/החלקה
+    let startX=0, curX=0, dragging=false;
+    const width = ()=> stage.clientWidth;
+
+    const onStart = e=>{
+      dragging=true;
+      startX = ('touches'in e)? e.touches[0].clientX : e.clientX;
+      stage.style.transition='none';
+    };
+    const onMove = e=>{
+      if(!dragging) return;
+      curX = ('touches'in e)? e.touches[0].clientX : e.clientX;
+      const dx = curX - startX;
+      stage.style.transform = `translateX(${ -idx*width() + dx }px)`;
+    };
+    const onEnd = ()=>{
+      if(!dragging) return;
+      dragging=false;
+      const dx = curX - startX;
+      const threshold = Math.min(120, width()*0.18);
+      if(dx < -threshold && idx < total-1) idx++;
+      else if(dx > threshold && idx > 0) idx--;
+      stage.style.transition='transform .25s ease';
+      stage.style.transform = `translateX(${ -idx*width() }px)`;
+      update();
+    };
+
+    stage.addEventListener('mousedown',onStart);
+    stage.addEventListener('mousemove',onMove);
+    window.addEventListener('mouseup',onEnd);
+    stage.addEventListener('touchstart',onStart,{passive:true});
+    stage.addEventListener('touchmove',onMove,{passive:true});
+    stage.addEventListener('touchend',onEnd);
+
+    // מקשי חיצים
+    window.addEventListener('keydown',e=>{
+      if(e.key==='ArrowLeft'){ if(idx>0){ idx--; snap(); } }
+      if(e.key==='ArrowRight'){ if(idx<total-1){ idx++; snap(); } }
+    });
+
+    // שינוי גודל
+    window.addEventListener('resize', ()=> snap());
+
+    function snap(){
+      stage.style.transition='transform .25s ease';
+      stage.style.transform = `translateX(${ -idx*width() }px)`;
+      update();
+    }
+    function update(){
+      counter.textContent = `${idx+1}/${total}`;
+    }
+
+    // התחלת מצב
+    snap();
+  }
+
+  load();
+})();
+</script>
 </body>
 </html>
