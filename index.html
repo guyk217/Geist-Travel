@@ -1,132 +1,27 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="he" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Europe Roots Trip — Reader</title>
-
-  <!-- פונט נוסטלגי + טקסט -->
+  <title>Geist Family Library</title>
   <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Assistant:wght@300;400;600&display=swap" rel="stylesheet">
-
-  <!-- עיצוב מחברת -->
-  <link rel="stylesheet" href="../../css/book.css">
+  <link rel="stylesheet" href="css/styles.css">
 </head>
 <body class="bg-paper">
-
-<div class="container">
   <header class="site-header">
-    <h1 class="brand">Europe Roots Trip</h1>
-    <p class="tagline">מסע השורשים של סבא — קריאה נעימה</p>
+    <h1 class="brand">ספריית משפחת גייסט</h1>
+    <p class="tagline">מסעות, יומנים ותמונות — במהדורה דיגיטלית משפחתית</p>
   </header>
 
-  <main id="sections"></main>
-</div>
+  <main class="container">
+    <section id="shelf" class="shelf"></section>
+  </main>
 
-<script>
-// --- הגדרות קובץ טקסט ותמונות ---
-const TXT_URL = 'Europe-roots-trip.txt';
-const IMG_DIR = '../../assets/europe-roots-trip/images/';
-const IMG_EXTS = ['.jpg','.jpeg','.png','.webp'];
+  <footer class="site-footer">
+    <p>© <span id="year"></span></p>
+  </footer>
 
-async function headExists(url){
-  try{
-    const r = await fetch(url, { method:'HEAD' });
-    return r.ok;
-  }catch(e){ return false; }
-}
-async function findImageSrc(base){
-  for (const ext of IMG_EXTS){
-    const url = base + ext;
-    if (await headExists(url)) return url;
-  }
-  return null;
-}
-
-(async function init(){
-  const mount = document.getElementById('sections');
-  try{
-    const res = await fetch(TXT_URL);
-    if(!res.ok) throw new Error('Text file not found');
-    let raw = await res.text();
-
-    // 1) החלפת {image-N} בתגיות IMG
-    const jobs = [];
-    raw = raw.replace(/\{image-(\d+)\}/g, (m, num)=>{
-      const ph = `@@IMG_${num}@@`;
-      jobs.push((async ()=>{
-        const base = IMG_DIR + `image-${num}`;
-        const src  = await findImageSrc(base);
-        return { ph, html: src ? `<img src="${src}" alt="image-${num}">`
-                               : `<div class="pill">Missing image-${num}</div>` };
-      })());
-      return ph;
-    });
-    const results = await Promise.all(jobs);
-    let hydrated = raw;
-    for (const r of results) hydrated = hydrated.replaceAll(r.ph, r.html);
-
-    // 2) פיצול לחלקים על ********
-    const parts = hydrated
-      .split(/\r?\n\*{8,}\r?\n/)
-      .map(s => s.trim())
-      .filter(Boolean);
-
-    mount.innerHTML = ''; // נקה
-
-    // 3) עבור כל חלק — Place/Date וכוכבית בודדת
-    parts.forEach(part => {
-      let place=null, date=null, body=part;
-
-      body = body.replace(/^(Place:\s*)(.+)\s*\r?\n/i, (_,p,val)=>{
-        place = val.trim(); return '';
-      });
-      body = body.replace(/^(Date:\s*)(.+)\s*\r?\n/i,  (_,p,val)=>{
-        date = val.trim();  return '';
-      });
-
-      body = body
-        .replace(/\r?\n\*\r?\n/g, '\n@@STAR@@\n')
-        .trim();
-
-      const sec = document.createElement('section');
-      sec.className = 'section';
-
-      if(place || date){
-        const meta = document.createElement('div');
-        meta.className = 'meta';
-        if(place){ const s = document.createElement('span'); s.className='pill'; s.textContent=`Place: ${place}`; meta.appendChild(s); }
-        if(date){  const s = document.createElement('span'); s.className='pill'; s.textContent=`Date: ${date}`;  meta.appendChild(s); }
-        sec.appendChild(meta);
-      }
-
-      const bodyDiv = document.createElement('div');
-      bodyDiv.className = 'body';
-      const chunks = body.split('@@STAR@@');
-      chunks.forEach((chunk, idx) => {
-        if (idx>0){
-          const star = document.createElement('div');
-          star.className = 'star-hr';
-          star.innerHTML = '<span class="star">★</span>';
-          bodyDiv.appendChild(star);
-        }
-        const span = document.createElement('span');
-        span.innerHTML = chunk;
-        bodyDiv.appendChild(span);
-      });
-
-      sec.appendChild(bodyDiv);
-      mount.appendChild(sec);
-    });
-
-    if(!parts.length){
-      mount.textContent = '';
-    }
-  }catch(err){
-    mount.textContent = '';
-    console.error(err);
-  }
-})();
-</script>
-
+  <script src="js/utils.js"></script>
+  <script src="js/home.js"></script>
 </body>
 </html>
