@@ -1,17 +1,22 @@
-// Reader – עימוד לפי מספר שורות קבוע + טעינה עם רקע מחברת
-// book.txt נטען מתוך books/<slug>/book.txt, תמונות ב books/<slug>/(images|image)/image-N.(jpg|jpeg|png|webp)
+// Reader v2 – יציב למובייל:
+// * טוען books/<slug>/book.txt
+// * מחליף {image-N} בתמונה אמיתית (נטענת מראש + width/height למניעת קפיצות)
+// * כוכביות ****** -> <hr>
+// * עימוד לפי 17 שורות לעמוד (תמונה/HR = דף משלהם)
+// * חצים + החלקה, השבתת חצים בתחילת/סוף
+// * שכבת "טוען את הספר…" עד שהכול מוכן
 
-const EXTENSIONS = ['.jpg', '.JPG', '.jpeg', '.JPEG', '.png', '.webp'];
+const EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp']; // jpg תחילה
 
-// ---- פרמטרי עימוד (מעודכן: פחות שורות בעמוד) ----
-const LINES_PER_PAGE   = 16;   // ↓ היה 22
-const CHARS_PER_LINE   = 56;
-const IMG_LINE_WEIGHT  = 18;
-const HR_LINE_WEIGHT   = 2;
-
+// ------- עזר
 function qs(name){
   const v = new URLSearchParams(location.search).get(name);
   return v ? decodeURIComponent(v) : null;
+}
+function showLoading(show){
+  const el = document.getElementById('loading');
+  if (!el) return;
+  el.style.display = show ? 'flex' : 'none';
 }
 function setCounter(i, total){
   const c = document.getElementById('counter');
@@ -24,54 +29,56 @@ async function fetchText(url){
   if(!r.ok) throw new Error(`HTTP ${r.status}`);
   return await r.text();
 }
-async function probeImage(base){
-  // מנסה את כל הסיומות (כולל .jpg באותיות קטנות/גדולות)
-  for(const ext of EXTENSIONS){
+
+// ------- תמונות – זיהוי והטענה מראש (כולל מימדים)
+async function loadImage(url){
+  const img = new Image();
+  img.decoding = 'async';
+  img.loading  = 'eager';
+  return await new Promise(resolve=>{
+    img.onload  = ()=>resolve({ ok:true, w:img.naturalWidth||800, h:img.naturalHeight||600 });
+    img.onerror = ()=>resolve({ ok:false });
+    img.src = url;
+  });
+}
+async function probeImageBase(base){
+  for (const ext of EXTENSIONS){
     const url = `${base}${ext}`;
-    const ok = await new Promise(res=>{
-      const im = new Image();
-      im.onload = ()=>res(true); im.onerror = ()=>res(false);
-      im.src = url;
-    });
-    if(ok) return url;
+    const res = await loadImage(url);
+    if (res.ok) return { url, w:res.w, h:res.h };
   }
   return null;
 }
 async function hydrateImages(raw, imgDir){
-  // תמיכה גם בתיקייה images/ וגם image/
-  const altDir = imgDir.endsWith('/images') ? imgDir.replace(/\/images$/, '/image') : imgDir;
-
   const jobs = [];
   const withPh = raw.replace(/\{image-(\d+)\}/g, (m,n)=>{
     const ph = `@@IMG_${n}@@`;
     jobs.push((async ()=>{
-      // ננסה קודם images/, ואז image/
-      const src =
-        (await probeImage(`${imgDir}/image-${n}`)) ||
-        (await probeImage(`${altDir}/image-${n}`));
-
-      const html = src ? `<img src="${src}" alt="image-${n}">`
-                       : `<div class="pill">Missing image ${n}</div>`;
+      const info = await probeImageBase(`${imgDir}/image-${n}`);
+      const html = info
+        ? `<img src="${info.url}" width="${info.w}" height="${info.h}" alt="image-${n}" decoding="async" loading="lazy" draggable="false">`
+        : `<div class="pill">Missing image ${n}</div>`;
       return {ph, html};
     })());
     return ph;
   });
   const done = await Promise.all(jobs);
   let out = withPh;
-  for(const {ph,html} of done) out = out.replaceAll(ph, html);
+  for (const {ph,html} of done) out = out.replaceAll(ph, html);
   return out;
 }
+
+// ------- המרות טקסט -> HTML
 function escapeHTML(s){
   return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-
 function textToHTML(text){
-  // שומרים <img …> כמו שהוא, וממירים רק טקסט
+  // שומרים תמונות כפי שהן; ממירים רק טקסט
   return text
     .split(/(<img[^>]*>)/gi)
     .map(part=>{
       if (!part) return '';
-      if (/^<img/i.test(part)) return part;          // אל תיגע בתמונה
+      if (/^<img/i.test(part)) return part;
       return part.split(/\r?\n/).map(line=>{
         if (/^\*{6,}\s*$/.test(line)) return '<hr class="separator">';
         if (/^\s*$/.test(line))       return '<br>';
@@ -80,84 +87,94 @@ function textToHTML(text){
     })
     .join('');
 }
-// ---- עימוד לפי “שורות” ----
-function tokenize(html){
-  const tokens = [];
-  html.split(/(<img[^>]+>|<hr class="separator">)/g).forEach(part=>{
-    if(!part) return;
-    if(/^<img/i.test(part)) tokens.push({kind:'img', html:part, w:IMG_LINE_WEIGHT});
-    else if(/^<hr/i.test(part)) tokens.push({kind:'hr', html:part, w:HR_LINE_WEIGHT});
-    else tokens.push({kind:'txt', html:part});
-  });
-  return tokens;
+
+// ------- DOM לעמודים
+function clearTrack(){
+  const track = document.getElementById('track');
+  while(track.firstChild) track.removeChild(track.firstChild);
 }
-function weightOfText(txt){
-  const clean = txt.replace(/<[^>]+>/g,'');
-  const chars = clean.length;
-  return Math.ceil(chars / CHARS_PER_LINE);
-}
-function paginateByLines(html){
-  const tokens = tokenize(html);
-  const pages = [];
-  let curLines = 0;
-  let curHTML  = '';
-
-  const pushPage = ()=>{
-    pages.push(curHTML || '&nbsp;');
-    curHTML = '';
-    curLines = 0;
-  };
-
-  for(const tk of tokens){
-    if(tk.kind === 'txt'){
-      if(!tk.html.trim()){ curHTML += tk.html; continue; }
-      let remaining = tk.html;
-      while(remaining){
-        const room = LINES_PER_PAGE - curLines;
-        if(room <= 0){ pushPage(); continue; }
-
-        const charsRoom = room * CHARS_PER_LINE;
-        if(remaining.length <= charsRoom){
-          curHTML += remaining;
-          curLines += weightOfText(remaining);
-          remaining = '';
-        }else{
-          let cut = remaining.slice(0, charsRoom);
-          const lastSpace = cut.lastIndexOf(' ');
-          if(lastSpace > charsRoom * 0.6) cut = cut.slice(0, lastSpace);
-          curHTML += cut;
-          curLines += weightOfText(cut);
-          remaining = remaining.slice(cut.length);
-          if(curLines >= LINES_PER_PAGE) pushPage();
-        }
-      }
-    }else{
-      const w = tk.w;
-      if(w > LINES_PER_PAGE){
-        if(curLines>0) pushPage();
-        curHTML += tk.html;
-        pushPage();
-        continue;
-      }
-      if(curLines + w > LINES_PER_PAGE) pushPage();
-      curHTML += tk.html;
-      curLines += w;
-    }
-  }
-  if(curHTML.trim() || !pages.length) pushPage();
-  return pages;
-}
-
-// ---- הצגה / ניווט ----
 function buildPage(html){
   const p   = document.createElement('div'); p.className='page';
   const card= document.createElement('div'); card.className='page-card';
   const inn = document.createElement('div'); inn.className='page-inner';
   inn.innerHTML = html;
   card.appendChild(inn); p.appendChild(card);
-  return p;
+  return {page:p, inner:inn};
 }
-function clear(el){ while(el.firstChild) el.removeChild(el.firstChild); }
+
+// ------- עימוד לפי מספר שורות
+function paginate(html){
+  const track = document.getElementById('track');
+  clearTrack();
+
+  const meas = buildPage('');
+  meas.page.style.visibility = 'hidden';
+  track.appendChild(meas.page);
+
+  const MAX_LINES = 17; // בקשתך – שורה אחת פחות
+  const lh = parseFloat(getComputedStyle(meas.inner).lineHeight) || 28;
+
+  // מפצלים ל"בלוקים" (תמונה/HR) וטקסט
+  const tokens = [];
+  html.split(/(<img[^>]+>|<hr class="separator">)/gi).forEach(part=>{
+    if(!part) return;
+    if(/^<img|^<hr/i.test(part)) tokens.push({t:'block', v:part});
+    else                        tokens.push({t:'text',  v:part});
+  });
+
+  const pages = [];
+  let cur = '';
+
+  const linesOf = (candidate)=>{
+    meas.inner.innerHTML = candidate || '';
+    return Math.ceil(meas.inner.scrollHeight / lh);
+  };
+  const flush = ()=>{
+    if (cur.trim()) pages.push(cur);
+    cur = '';
+  };
+
+  for (const tk of tokens){
+    if (tk.t === 'block'){
+      if (cur.trim()) flush();
+      pages.push(tk.v);       // תמונה / hr – עמוד נפרד
+      cur = '';
+      continue;
+    }
+    // טקסט – מילה־מילה עד שמגיעים לתקרה
+    const parts = tk.v.split(/(\s+)/);
+    for (const chunk of parts){
+      const tryHtml = cur + chunk;
+      if (linesOf(tryHtml) <= MAX_LINES){
+        cur = tryHtml;
+      } else {
+        flush();
+        cur = chunk.trimStart();
+        if (cur && linesOf(cur) > MAX_LINES){
+          // שמרני: חיתוך אלסטי אם מילה חריגה מאד
+          let cut = cur;
+          while (cut.length > 1 && linesOf(cut) > MAX_LINES){
+            cut = cut.slice(0, Math.floor(cut.length*0.9));
+          }
+          if (cut.trim()) pages.push(cut);
+          cur = cur.slice(cut.length);
+        }
+      }
+    }
+  }
+  flush();
+
+  // לבנות דפים אמיתיים
+  clearTrack();
+  for (const h of pages){
+    const {page, inner} = buildPage(h);
+    inner.style.overflow = 'hidden';
+    track.appendChild(page);
+  }
+  return pages.length || 1;
+}
+
+// ------- החלקה
 function enableSwipe(onLeft, onRight){
   const el = document.getElementById('stage');
   let x0=null, y0=null, t0=0;
@@ -176,44 +193,33 @@ function enableSwipe(onLeft, onRight){
   },{passive:true});
 }
 
-// ---- Loader ----
-function showLoader(msg='טוען את הספר…'){
-  let el = document.getElementById('loader');
-  if(!el){
-    el = document.createElement('div');
-    el.id = 'loader';
-    el.innerHTML = `
-      <div class="loader-card">
-        <div class="spinner"></div>
-        <div class="loader-text">${msg}</div>
-      </div>`;
-    document.body.appendChild(el);
-  }else{
-    el.querySelector('.loader-text').textContent = msg;
-  }
-  el.style.display='grid';
-}
-function hideLoader(){
-  const el = document.getElementById('loader');
-  if(el) el.style.display='none';
-}
-
-// ---- main ----
+// ------- init
 (async function init(){
+  showLoading(true);
+
+  const slug = qs('book');
+  const track = document.getElementById('track');
+  if(!slug){
+    showLoading(false);
+    track.innerHTML='<div class="page"><div class="page-card"><div class="page-inner">Missing ?book=</div></div></div>';
+    return;
+  }
+
+  const txtURL = `books/${slug}/book.txt`;
+  const imgDir = `books/${slug}/images`;
+
   try{
-    const slug = qs('book');
-    const track = document.getElementById('track');
-    if(!slug){ track.innerHTML='<div class="page"><div class="page-card"><div class="page-inner">Missing ?book=</div></div></div>'; return; }
-
-    showLoader('טוען טקסט…');
-    const txtURL = `books/${slug}/book.txt`;
-    const imgDir = `books/${slug}/images`;
     let raw = await fetchText(txtURL);
+    if(!raw.trim()){
+      showLoading(false);
+      track.innerHTML='<div class="page"><div class="page-card"><div class="page-inner">Empty book.txt</div></div></div>';
+      return;
+    }
 
-    showLoader('מטפל בתמונות…');
+    // מציב תמונות (נטענות מראש + מימדים) לפני עימוד
     raw = await hydrateImages(raw, imgDir);
 
-    // Place / Date (רשות)
+    // Place/Date בראש הטקסט (אם קיימים)
     let place=null, date=null;
     raw = raw.replace(/^(Place:\s*)(.+)\s*\r?\n/i, (_,p,v)=>{ place=v.trim(); return ''; });
     raw = raw.replace(/^(Date:\s*)(.+)\s*\r?\n/i,  (_,p,v)=>{ date =v.trim(); return ''; });
@@ -224,32 +230,39 @@ function hideLoader(){
     if(place) pills.push(`<span class="pill">Place: ${place}</span>`);
     if(pills.length) html = `<div class="meta-pills">${pills.join(' ')}</div>` + html;
 
-    showLoader('מעצב עמודים…');
-    const pagesHTML = paginateByLines(html);
-
-    hideLoader();
-    clear(track);
-    for(const h of pagesHTML) track.appendChild(buildPage(h));
-
+    // עימוד ובנייה
+    let total = paginate(html);
     let index = 0;
-    const total = pagesHTML.length;
+    setCounter(index, total);
+
     const go = (i)=>{
       index = Math.max(0, Math.min(total-1, i));
       const pageW = document.getElementById('stage').clientWidth;
-      track.style.transition = 'transform 260ms ease';
-      track.style.transform  = `translate3d(${-index*pageW}px,0,0)`;
+      const x = -index * pageW;
+      const tr = document.getElementById('track');
+      tr.style.transition = 'transform 260ms ease';
+      tr.style.transform  = `translate3d(${x}px,0,0)`;
       setCounter(index, total);
     };
-    setCounter(index, total);
+
     document.getElementById('prev').onclick = ()=>go(index-1);
     document.getElementById('next').onclick = ()=>go(index+1);
     enableSwipe(()=>go(index-1), ()=>go(index+1));
-    addEventListener('resize', ()=>go(index));
+
+    // ריסייז/רוטציה – מחשב עימוד מחדש (בלי לגעת בתמונות שכבר נטענו)
+    addEventListener('resize', ()=>{
+      const keep=index;
+      total = paginate(html);
+      go(Math.min(keep, total-1));
+    });
+
+    // התחל בעמוד הראשון וסגור את שכבת הטעינה
+    go(0);
+    showLoading(false);
 
   }catch(err){
-    hideLoader();
-    const track = document.getElementById('track');
     console.error(err);
-    track.innerHTML = `<div class="page"><div class="page-card"><div class="page-inner">שגיאה בטעינת הספר<br>${String(err)}</div></div></div>`;
+    showLoading(false);
+    track.innerHTML = `<div class="page"><div class="page-card"><div class="page-inner">Failed to load: ${txtURL}<br>${String(err)}</div></div></div>`;
   }
 })();
