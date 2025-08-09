@@ -3,28 +3,190 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Reader • Geist Family</title>
-  <link rel="stylesheet" href="css/styles.css">
+  <title>Reader</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Heebo:wght@300;600&display=swap" rel="stylesheet">
   <style>
-    .back { margin:18px 0; }
-    .back a { text-decoration:none; color:#444; border:1px solid #ddd; padding:.45rem .7rem; border-radius:10px; background:#fafafa; }
-    .book-title { text-align:center; margin:6px 0 18px; }
-    .book-title h1 { margin:0; font-size:42px; font-family:"Pilcrow Rounded", system-ui, sans-serif; }
+    :root{
+      --paper:#f8f3e7; --ink:#2b2623; --line:#e7dfcf; --pill:#f0eadf; --accent:#6c8a8f;
+    }
+    html,body{height:100%}
+    body{
+      margin:0;color:var(--ink);
+      background:
+        repeating-linear-gradient(#0000 0 36px,var(--line) 36px 37px),
+        radial-gradient(1200px 500px at 50% -200px,#fff8ef,#f5eee2 55%,#efe6d7);
+      font-family:'Heebo',system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      line-height:1.75;
+    }
+    .wrap{max-width:900px;margin:0 auto;padding:28px}
+    header{text-align:center;margin:8px 0 18px;font-family:'Patrick Hand',cursive}
+    h1{margin:0;font-size:clamp(32px,7vw,60px);letter-spacing:.06em}
+    .meta-top{margin-top:6px;color:#6a645d;font-weight:600}
+    .back{position:fixed;top:14px;inset-inline-start:14px}
+    .back a{background:#2c2a27;color:#fff;text-decoration:none;border-radius:999px;padding:8px 12px;font-weight:600}
+    .section{
+      background:linear-gradient(#fffdf9,#fbf3e6);
+      border:1px solid #e8dfcf;border-radius:16px;
+      box-shadow:0 2px 0 #e6dccd, 0 10px 24px rgba(0,0,0,.06);
+      padding:18px 18px 6px;margin:0 0 16px;
+    }
+    .meta{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 8px}
+    .pill{background:var(--pill);border:1px solid #e7dfcf;border-radius:999px;padding:2px 10px;font-size:13px}
+    .body{font-size:17px;white-space:pre-wrap}
+    .body img{display:block;max-width:100%;height:auto;border-radius:10px;border:1px solid #e8dfcf;box-shadow:0 1px 0 #e6dccd,0 8px 18px rgba(0,0,0,.05);margin:10px auto}
+    .star-hr{display:flex;align-items:center;gap:10px;color:#8b8176;margin:14px 0 6px}
+    .star-hr:before,.star-hr:after{content:"";flex:1;height:1px;background:#e0d7c6}
+    .star{font-size:18px}
+    footer{margin:30px 0 10px;text-align:center;color:#847d71;font-size:13px}
+    @media (prefers-color-scheme: dark){
+      body{color:#eee}
+      .section{background:linear-gradient(#2b2927,#272421);border-color:#38332c}
+      .body img{border-color:#3a342d}
+      .pill{background:#3a352f;border-color:#4a433a;color:#e7e0d6}
+      .star-hr:before,.star-hr:after{background:#4a433a}
+      .back a{background:#444}
+    }
   </style>
 </head>
 <body>
-  <header class="hero">
-    <div class="back"><a href="index.html">← חזרה למדף</a></div>
-    <div class="book-title">
-      <h1 id="bookTitle">Loading…</h1>
-      <p id="bookSubtitle" class="subtitle"></p>
-    </div>
-  </header>
+  <div class="back"><a href="index.html">← חזרה</a></div>
+  <div class="wrap">
+    <header>
+      <h1 id="title">ספר</h1>
+      <div id="subtitle" class="meta-top"></div>
+    </header>
+    <div id="sections" aria-live="polite"></div>
+    <footer id="foot"></footer>
+  </div>
 
-  <main class="container">
-    <div id="sections" class="sections" aria-live="polite"></div>
-  </main>
+  <script>
+    // ---------- helpers ----------
+    const q = new URLSearchParams(location.search);
+    const slug = q.get('book'); // books/<slug>/{book.txt,images/}
+    const TXT_URL = slug ? `books/${slug}/book.txt` : null;
+    const IMG_DIR = slug ? `books/${slug}/images/` : null;
+    const IMG_EXTS = ['.jpg','.jpeg','.png','.webp'];
 
-  <script src="js/reader.js"></script>
+    function setTitleFromSlug(){
+      if(!slug) return;
+      const pretty = slug.replace(/[-_]+/g,' ').replace(/\b\w/g,m=>m.toUpperCase());
+      document.getElementById('title').textContent = pretty;
+      document.title = pretty + ' • Reader';
+    }
+
+    async function headExists(url){
+      try{
+        const r = await fetch(url, { method:'HEAD', cache:'no-store' });
+        return r.ok;
+      }catch(e){ return false; }
+    }
+    async function findImageSrc(base){
+      for(const ext of IMG_EXTS){
+        const url = base + ext;
+        if(await headExists(url)) return url;
+      }
+      return null;
+    }
+
+    // ---------- render ----------
+    (async function init(){
+      setTitleFromSlug();
+      const mount = document.getElementById('sections');
+      const sub   = document.getElementById('subtitle');
+      const foot  = document.getElementById('foot');
+
+      if(!TXT_URL){
+        mount.innerHTML = '<div class="section"><div class="body">לא נבחר ספר.</div></div>';
+        return;
+      }
+
+      try{
+        const res = await fetch(TXT_URL, {cache:'no-store'});
+        if(!res.ok) throw new Error('Text not found');
+        let raw = await res.text();
+
+        // החלפת {image-N} לתגיות IMG (עם ניסיון אוטומטי לסיומת)
+        const jobs = [];
+        raw = raw.replace(/\{image-(\d+)\}/g,(m,n)=>{
+          const ph = `@@IMG_${n}@@`;
+          jobs.push((async ()=>{
+            const base = IMG_DIR + `image-${n}`;
+            const src  = await findImageSrc(base);
+            return { ph, html: src ? `<img src="${src}" alt="image-${n}">`
+                                   : `<div class="pill">תמונה חסרה image-${n}</div>`};
+          })());
+          return ph;
+        });
+        const results = await Promise.all(jobs);
+        let hydrated = raw;
+        for(const r of results) hydrated = hydrated.replaceAll(r.ph, r.html);
+
+        // פיצול ע״י ******** (שורה של 8+ כוכביות)
+        const parts = hydrated
+          .split(/\r?\n\*{8,}\r?\n/)
+          .map(s=>s.trim())
+          .filter(Boolean);
+
+        // כותרת משנה מתוך הפסקה הראשונה אם יש Place/Date
+        // נציג מטה בכל סקשן, אבל בכותרת נציג את של הראשון.
+        let firstPlace='', firstDate='';
+
+        mount.innerHTML='';
+        parts.forEach((part, idx) => {
+          let place=null, date=null, body=part;
+
+          body = body.replace(/^(Place:\s*)(.+)\s*\r?\n/i,(_,p,val)=>{ place=val.trim(); return ''; });
+          body = body.replace(/^(Date:\s*)(.+)\s*\r?\n/i, (_,p,val)=>{ date =val.trim(); return ''; });
+
+          if(idx===0){ firstPlace=place||''; firstDate=date||''; }
+
+          // המרת שורה של כוכבית בודדת לקו עם כוכב
+          body = body.replace(/\r?\n\*\r?\n/g,'\n@@STAR@@\n').trim();
+
+          const sec = document.createElement('section');
+          sec.className='section';
+
+          if(place || date){
+            const meta = document.createElement('div');
+            meta.className='meta';
+            if(place){ const s=document.createElement('span'); s.className='pill'; s.textContent=`Place: ${place}`; meta.appendChild(s); }
+            if(date){  const s=document.createElement('span'); s.className='pill'; s.textContent=`Date: ${date}`;  meta.appendChild(s); }
+            sec.appendChild(meta);
+          }
+
+          const bodyDiv = document.createElement('div');
+          bodyDiv.className='body';
+          const chunks = body.split('@@STAR@@');
+          chunks.forEach((chunk,i)=>{
+            if(i>0){
+              const star=document.createElement('div');
+              star.className='star-hr';
+              star.innerHTML='<span class="star">★</span>';
+              bodyDiv.appendChild(star);
+            }
+            const span=document.createElement('span');
+            span.innerHTML = chunk; // כבר כולל <img> אם יש
+            bodyDiv.appendChild(span);
+          });
+
+          sec.appendChild(bodyDiv);
+          mount.appendChild(sec);
+        });
+
+        // כותרת משנה
+        const bits=[];
+        if(firstPlace) bits.push(`מקום: ${firstPlace}`);
+        if(firstDate)  bits.push(`שנה/תאריך: ${firstDate}`);
+        sub.textContent = bits.join(' • ');
+
+        foot.textContent = '';
+
+      }catch(err){
+        console.error(err);
+        mount.innerHTML = '<div class="section"><div class="body">שגיאה בטעינת הספר.</div></div>';
+      }
+    })();
+  </script>
 </body>
 </html>
