@@ -1,165 +1,151 @@
-const exts = ['.jpg','.jpeg','.png','.webp'];
+// קריאת ספר: מפרק לפי מפרידי ********, מצמיד תמונות {image-N},
+// מציג Place/Date כשבבי מידע, ודפדוף ע"י החלקה (סוויפ).
 
-const qs = new URLSearchParams(location.search);
-const slug = qs.get('book') || '';
-const TXT_URL = `books/${slug}/book.txt`;
-const IMG_DIR = `books/${slug}/images/`;
+(function () {
+  const params = new URLSearchParams(location.search);
+  const slug   = params.get('slug') || 'europe-roots-1993'; // ברירת מחדל לספר שלך
+  const base   = `books/${slug}`;
+  const txtURL = `${base}/book.txt`;
+  const imgDir = `${base}/images`;
 
-const pager = document.getElementById('pager');
-const pageCountEl = document.getElementById('pageCount');
-const titleEl = document.getElementById('bookTitle');
-const subEl = document.getElementById('bookSub');
+  const canvas = document.getElementById('canvas');
+  const pager  = document.getElementById('pager');
+  const hint   = document.getElementById('hint');
 
-let pages = [];
-let idx = 0;
+  // --------- Utilities ----------
+  const IMG_EXTS = ['jpg','jpeg','png','webp'];
 
-// ---- boot ----
-(async function(){
-  if(!slug){ pager.textContent='לא נבחר ספר.'; return; }
-
-  // קרא את מטא הספר כדי להציג כותרת/תת־כותרת
-  try{
-    const r = await fetch('books/books.json');
-    const arr = await r.json();
-    const meta = arr.find(x => x.slug === slug);
-    if(meta){
-      titleEl.textContent = meta.title || slug;
-      subEl.textContent   = meta.subtitle || '';
-      document.querySelector('.book-head').dataset.title = meta.title || '';
-      document.title = `${meta.title} – Reader`;
-    }
-  }catch{}
-
-  try{
-    const res = await fetch(TXT_URL);
-    if(!res.ok) throw new Error('Text not found');
-    let raw = await res.text();
-
-    // החלף {image-N} לתגיות IMG (אסינכרוני – נשתמש בפלייסהולדרים)
-    const jobs = [];
-    raw = raw.replace(/\{image-(\d+)\}/g,(m,n)=>{
-      const ph = `@@IMG_${n}@@`;
-      jobs.push(replaceImage(ph, `image-${n}`));
-      return ph;
-    });
-    const repl = await Promise.all(jobs);
-    repl.forEach(({ph,html}) => raw = raw.replaceAll(ph, html));
-
-    // הפוך שורה יחידה של * לקו כוכבית בהמשך
-    raw = raw.replace(/\r?\n\*\r?\n/g, '\n@@STAR@@\n');
-
-    // פצל לעמודים לפי ********
-    pages = raw.split(/\r?\n\*{8,}\r?\n/).map(s => s.trim()).filter(Boolean);
-
-    buildPager();
-    go(0, false);
-    enableSwipe();
-  }catch(e){
-    console.error(e);
-    pager.innerHTML = '<div class="pill">Error loading text</div>';
+  function imgHTML(num){
+    // טריק זעיר: נטען <picture> עם כמה פורמטים; הדפדפן יבחר מה שקיים.
+    const name = `image-${num}`;
+    const sources = IMG_EXTS.map(ext => `<source srcset="${imgDir}/${name}.${ext}" type="image/${ext==='jpg'?'jpeg':ext}">`).join('');
+    // נפילה ל-JPG (אם אין כלום – יוצג ריבוע "חסר תמונה")
+    return `
+      <picture onerror="this.outerHTML='<div class=chip>Missing ${name}</div>'">
+        ${sources}
+        <img src="${imgDir}/${name}.jpg" alt="${name}">
+      </picture>`;
   }
-})();
 
-async function replaceImage(ph, base){
-  for(const ext of exts){
-    const url = IMG_DIR + base + ext;
-    try{
-      const r = await fetch(url, {method:'HEAD'});
-      if(r.ok) return { ph, html:`<img src="${url}" alt="${base}">` };
-    }catch(){}
+  function splitParts(raw){
+    // ננרמל שורות, נחליף תמונות, ונפצל.
+    let text = raw.replace(/\r\n?/g, '\n');
+
+    // החלפת {image-N} ל-HTML (נשאיר בלי escaping מכיוון שהטקסט שלנו “נקי”)
+    text = text.replace(/\{image-(\d+)\}/g, (_,n)=> imgHTML(n));
+
+    // מפצלים על שורה של 8+ כוכביות – עם או בלי רווחים מסביב
+    const parts = text.split(/(?:^|\n)\*{8,}\s*(?:\n|$)/).map(s=>s.trim());
+    return parts.filter(p => p.length); // בלי חלקים ריקים
   }
-  return { ph, html:`<div class="pill">Missing ${base}</div>` };
-}
 
-function buildPager(){
-  pager.innerHTML = '';
-  const track = document.createElement('div');
-  track.className = 'page-track';
-  pager.appendChild(track);
+  function extractMetaAndBody(part){
+    // מוציא Place/Date משתי שורות ראשונות אם קיימות
+    let place=null, date=null, body=part;
 
-  pages.forEach(p => {
-    const sec = document.createElement('section');
-    sec.className = 'page';
+    body = body.replace(/^(?:Place:\s*)(.+)\s*\n/i, (_,v)=>{ place=v.trim(); return '' });
+    body = body.replace(/^(?:Date:\s*)(.+)\s*\n/i,  (_,v)=>{ date =v.trim(); return '' });
 
-    // Place + Date מההתחלה
-    let place=null, date=null, body=p;
+    // שורה של כוכבית בודדת => קו דקורטיבי
+    body = body.replace(/(?:^|\n)\*\s*(?:\n|$)/g, '\n@@STAR@@\n');
 
-    body = body.replace(/^(Place:\s*)(.+)\s*\r?\n/i, (_,a,b)=>{ place=b.trim(); return '' });
-    body = body.replace(/^(Date:\s*)(.+)\s*\r?\n/i,  (_,a,b)=>{ date=b.trim();  return '' });
+    return { place, date, body: body.trim() };
+  }
 
-    const meta = document.createElement('div'); meta.className='meta';
-    if(place){ const s = chip(`Place: ${place}`); meta.appendChild(s); }
-    if(date){  const s = chip(`Date: ${date}`);  meta.appendChild(s); }
-    if(place || date) sec.appendChild(meta);
+  function pageDOM(meta){
+    const art = document.createElement('article');
+    art.className = 'page';
+    const inner = document.createElement('div');
+    inner.className = 'page-inner';
 
-    const div = document.createElement('div');
-    div.className = 'body';
+    // chips
+    const chips = document.createElement('div');
+    chips.className = 'chips';
+    if (meta.date)  chips.innerHTML += `<span class="chip">Date: ${meta.date}</span>`;
+    if (meta.place) chips.innerHTML += `<span class="chip">Place: ${meta.place}</span>`;
+    inner.appendChild(chips);
 
-    // star rule
-    const chunks = body.split('@@STAR@@');
-    chunks.forEach((chunk,i)=>{
-      if(i>0){
+    // body
+    const content = document.createElement('div');
+    content.className = 'content';
+    // נפרק לפי פלייסהולדר של קו-כוכב
+    meta.body.split('@@STAR@@').forEach((chunk, idx) => {
+      if (idx>0){
         const hr = document.createElement('div');
-        hr.className='star-hr';
-        hr.innerHTML = '<span class="star">★</span>';
-        div.appendChild(hr);
+        hr.className = 'star-hr';
+        hr.innerHTML = `<span class="star">★</span>`;
+        content.appendChild(hr);
       }
-      const span = document.createElement('span');
-      span.innerHTML = chunk; // כבר כולל <img>
-      div.appendChild(span);
+      const block = document.createElement('div');
+      block.innerHTML = chunk;          // כבר כולל <picture>/<img> מההחלפה
+      content.appendChild(block);
     });
 
-    sec.appendChild(div);
-    track.appendChild(sec);
-  });
-}
+    inner.appendChild(content);
+    art.appendChild(inner);
+    return art;
+  }
 
-function chip(txt){
-  const s=document.createElement('span');
-  s.className='pill'; s.textContent=txt; return s;
-}
+  // --------- Swipe navigation ----------
+  let current = 0, pages = [];
 
-function go(n, animate=true){
-  idx = Math.max(0, Math.min(n, pages.length-1));
-  const track = pager.querySelector('.page-track');
-  if(!animate) track.style.transition='none';
-  track.style.transform=`translateX(${-idx*100}%)`;
-  if(!animate) requestAnimationFrame(()=>track.style.transition='transform .35s ease');
-  pageCountEl.textContent = `${idx+1}/${pages.length}`;
-}
+  function show(i){
+    if (!pages.length) return;
+    current = Math.max(0, Math.min(i, pages.length-1));
+    canvas.style.transform = `translateX(${-current*100}%)`;
+    pager.textContent = `${current+1}/${pages.length}`;
+    // רמז החלקה – רק בדף הראשון
+    hint.style.opacity = current===0 && pages.length>1 ? '1' : '0';
+  }
 
-// Swipe
-function enableSwipe(){
-  const track = pager.querySelector('.page-track');
-  let startX=0, curX=0, dragging=false;
+  function bindSwipe(){
+    let startX=0, dx=0, touching=false;
+    const TH = 60; // threshold
 
-  pager.addEventListener('touchstart', e=>{
-    if(!e.touches.length) return;
-    dragging=true; startX=curX=e.touches[0].clientX;
-    track.style.transition='none';
-  }, {passive:true});
+    canvas.addEventListener('touchstart', e=>{
+      touching=true; startX = e.touches[0].clientX; dx=0;
+    }, {passive:true});
 
-  pager.addEventListener('touchmove', e=>{
-    if(!dragging) return;
-    curX = e.touches[0].clientX;
-    const dx = curX - startX;
-    track.style.transform = `translateX(${(-idx*100)+(dx/window.innerWidth*100)}%)`;
-  }, {passive:true});
+    canvas.addEventListener('touchmove', e=>{
+      if(!touching) return;
+      dx = e.touches[0].clientX - startX;
+      canvas.style.transition='none';
+      canvas.style.transform = `translateX(${(-current*100)+(dx/window.innerWidth*100)}%)`;
+    }, {passive:true});
 
-  pager.addEventListener('touchend', ()=>{
-    if(!dragging) return; dragging=false;
-    const dx = curX - startX;
-    track.style.transition='transform .25s ease';
-    if(Math.abs(dx) > window.innerWidth*0.18){
-      if(dx<0) go(idx+1); else go(idx-1);
-    }else{
-      go(idx); // חזור
+    canvas.addEventListener('touchend', ()=>{
+      canvas.style.transition='';
+      if (Math.abs(dx) > TH){
+        show( dx<0 ? current+1 : current-1 );
+      } else {
+        show(current);
+      }
+      touching=false; dx=0;
+    });
+  }
+
+  // --------- Boot ----------
+  (async function(){
+    try{
+      const res = await fetch(txtURL);
+      if(!res.ok) throw new Error('book.txt not found');
+      const raw = await res.text();
+
+      const parts = splitParts(raw);
+      pages = parts.map(p => extractMetaAndBody(p)).map(pageDOM);
+
+      // ננקה ונכניס DOM
+      canvas.innerHTML = '';
+      pages.forEach(p => canvas.appendChild(p));
+
+      // תצוגה ראשונית
+      bindSwipe();
+      show(0);
+    }catch(err){
+      canvas.innerHTML = `<div class="page"><div class="page-inner"><div class="content">Loading error: ${err.message}</div></div></div>`;
+      pager.textContent = '—';
+      console.error(err);
     }
-  });
+  })();
 
-  // גם חיצים במקלדת למקרה הצורך
-  window.addEventListener('keydown', e=>{
-    if(e.key==='ArrowLeft') go(idx+1);
-    if(e.key==='ArrowRight') go(idx-1);
-  });
-}
+})();
