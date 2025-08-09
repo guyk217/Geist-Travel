@@ -1,38 +1,57 @@
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>ספריית המסעות של סבא</title>
-  <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Assistant:wght@300;400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Geist Family • Books</title>
+  <link rel="stylesheet" href="css/styles.css">
+  <style>
+    .shelf { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:16px; }
+    .card {
+      background:#fff; border-radius:14px; padding:14px; box-shadow:0 6px 24px rgba(0,0,0,.08);
+      transition:.2s transform ease, .2s box-shadow ease;
+    }
+    .card:hover { transform:translateY(-2px); box-shadow:0 12px 30px rgba(0,0,0,.12); }
+    .card img { width:100%; height:180px; object-fit:cover; border-radius:10px; }
+    .card h3 { margin:.6rem 0 0; font-family:"Pilcrow Rounded", system-ui, sans-serif; }
+    .card p { margin:.35rem 0 0; color:#555; font-size:.95rem; min-height:2.6em; }
+    .topbar { text-align:center; margin:22px 0 8px; }
+    .brand { font-size:38px; letter-spacing:.5px; }
+  </style>
 </head>
-<body class="bg-paper">
-  <header class="site-header">
-    <h1 class="brand">ספריית המסעות של סבא</h1>
-    <p class="tagline">תמלולי יומנים + תמונות</p>
+<body>
+  <header class="hero">
+    <h1 class="brand">The Geist Library</h1>
+    <p class="subtitle">יומנים משפחתיים סרוקים ותמלולים מלווים</p>
   </header>
 
   <main class="container">
-    <section class="shelf">
-      <article class="book-card">
-        <a class="cover" href="books/europe-roots-trip/">
-          <div class="txt-cover">TXT</div>
-          <span class="ribbon">חדש</span>
-        </a>
-        <div class="meta">
-          <h2 class="title">Europe Roots Trip (1993)</h2>
-          <p class="desc">תמלול טקסטואלי + תמונות במקומות המדויקים ({image-N}).</p>
-          <ul class="chips"><li>טקסט</li><li>תמונות</li></ul>
-          <a class="btn" href="books/europe-roots-trip/">פתח</a>
-        </div>
-      </article>
-    </section>
+    <div id="shelf" class="shelf" aria-live="polite"></div>
   </main>
 
-  <footer class="site-footer">
-    <p>© נכתב באהבה!<span id="year"></span></p>
-  </footer>
-  <script src="js/main.js"></script>
+  <script>
+    async function loadShelf(){
+      const root = document.getElementById('shelf');
+      try{
+        const res = await fetch('books/books.json');
+        if(!res.ok) throw new Error('missing books.json');
+        const books = await res.json();
+        if(!Array.isArray(books) || !books.length){
+          root.innerHTML = '<p>לא נמצאו ספרים.</p>'; return;
+        }
+        root.innerHTML = books.map(b => `
+          <a class="card" href="reader.html?book=${encodeURIComponent(b.slug)}" aria-label="פתח את ${b.title}">
+            <img src="${b.cover || ''}" alt="">
+            <h3>${b.title} <small>${b.subtitle || ''}</small></h3>
+            <p>${b.description || ''}</p>
+          </a>
+        `).join('');
+      }catch(e){
+        root.innerHTML = '<p>שגיאה בטעינת מדף הספרים.</p>';
+        console.error(e);
+      }
+    }
+    loadShelf();
+  </script>
 </body>
 </html>
