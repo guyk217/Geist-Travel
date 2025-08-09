@@ -1,48 +1,40 @@
-// Reader v2.2 — 18 שורות לעמוד, דפדוף חלק, טעינה עדינה, תמונות JPG בלבד
-
-const LINES_PER_PAGE = 18;                // כמה שורות לעמוד (שנה כאן אם תרצה)
+// Reader v2.3 — דפדוף יציב, 18 שורות לעמוד, תמונות JPG כעמוד נפרד, טעינה עדינה
+const LINES_PER_PAGE = 18;          // שנה כאן אם תרצה
 const IMG_EXT = '.jpg';
-const qs = (k)=>new URLSearchParams(location.search).get(k);
-const $  = (s)=>document.querySelector(s);
+const qs = k => new URLSearchParams(location.search).get(k);
+const $  = s => document.querySelector(s);
 
-// UI helpers
-const setCounter = (i,total)=>{
+const esc = s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+function setCounter(i,total){
   $('#counter').textContent = `${i+1}/${Math.max(total,1)}`;
   $('#prev').disabled = (i<=0);
   $('#next').disabled = (i>=total-1);
-};
-const esc = (s)=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
-// ensure minimal CSS for date & overlay (לא דורש שינוי ב-CSS שלך)
-(function ensureAuxStyles(){
-  if (document.getElementById('reader-aux-css')) return;
-  const css = `
-    .date-banner{margin:0 0 8px 0; display:flex; gap:10px; align-items:baseline; flex-wrap:wrap}
-    .date-strong{font-weight:700; text-decoration:underline;}
+/* ---------- שכבת טעינה עדינה בתוך ה-stage ---------- */
+(function ensureOverlay(){
+  if ($('#reader-aux-css')) return;
+  const style = document.createElement('style');
+  style.id='reader-aux-css';
+  style.textContent = `
+    .date-banner{margin:0 0 8px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+    .date-strong{font-weight:700;text-decoration:underline}
     .date-year{opacity:.7}
-    #loadingOverlay{position:absolute; inset:0; display:none; place-items:center; z-index:4}
+    #loadingOverlay{position:absolute;inset:0;display:none;place-items:center;z-index:4}
     #loadingOverlay .bubble{
-      background:#2f2a26; color:#fff; padding:.65rem 1.1rem; border-radius:999px;
-      box-shadow:0 10px 28px rgba(0,0,0,.18);
+      background:#2f2a26;color:#fff;padding:.6rem 1.1rem;border-radius:999px;
+      box-shadow:0 10px 28px rgba(0,0,0,.18)
     }
   `;
-  const style = document.createElement('style');
-  style.id = 'reader-aux-css';
-  style.textContent = css;
   document.head.appendChild(style);
-})();
 
-function ensureOverlay(){
-  if (document.getElementById('loadingOverlay')) return;
   const ov = document.createElement('div');
-  ov.id = 'loadingOverlay';
+  ov.id='loadingOverlay';
   ov.innerHTML = `<div class="bubble">טוען את הספר…</div>`;
-  document.getElementById('stage').appendChild(ov);
-}
-const showLoading = on=>{
-  ensureOverlay();
-  document.getElementById('loadingOverlay').style.display = on ? 'grid' : 'none';
-};
+  $('#stage').appendChild(ov);
+})();
+const showLoading = on => { $('#loadingOverlay').style.display = on ? 'grid' : 'none'; };
 
 async function fetchText(url){
   const r = await fetch(url + `?v=${Date.now()}`, {cache:'no-store'});
@@ -50,15 +42,12 @@ async function fetchText(url){
   return r.text();
 }
 
-/* -------- חישוב תווים לשורה לפי הפונט בפועל (Canvas) -------- */
+/* ---------- חישוב תווים לשורה לפי רוחב .page-inner האמיתי ---------- */
 function calcCharsPerLine(){
-  // נבנה .page > .page-card > .page-inner נסתר, כדי לקבל בדיוק את רוחב השורה
-  const stage = document.getElementById('stage');
-  const page  = document.createElement('div'); page.className='page';
-  page.style.visibility='hidden';
+  const stage = $('#stage');
+  const page  = document.createElement('div'); page.className='page'; page.style.visibility='hidden';
   const card  = document.createElement('div'); card.className='page-card';
-  const inner = document.createElement('div'); inner.className='page-inner';
-  inner.textContent='X';
+  const inner = document.createElement('div'); inner.className='page-inner'; inner.textContent='X';
   card.appendChild(inner); page.appendChild(card); stage.appendChild(page);
 
   const style = getComputedStyle(inner);
@@ -66,20 +55,18 @@ function calcCharsPerLine(){
   const font = `${style.fontStyle} ${style.fontVariant} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
 
   const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  ctx.font = font;
+  const ctx = canvas.getContext('2d'); ctx.font = font;
 
   const sample = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .,;:!?\'"()[]{}-–—0123456789';
   const repeated = sample.repeat(8);
   const pxPerChar = ctx.measureText(repeated).width / repeated.length;
 
   stage.removeChild(page);
-
   const chars = Math.max(24, Math.min(140, Math.floor(innerWidth / pxPerChar) - 2));
   return chars;
 }
 
-/* -------- Tokenize: שורות/ריקים/מפריד/תמונה -------- */
+/* ---------- המרה לטוקנים: טקסט/ריק/מפריד/תמונה ---------- */
 function tokenize(raw, slug){
   const exp = raw.replace(/\{image-(\d+)\}/g, '\n[IMG:$1]\n');
   const rows = exp.split(/\r?\n/);
@@ -105,35 +92,30 @@ function tokenize(raw, slug){
   return tokens;
 }
 
-/* -------- עטיפה לפי מילים → שורות -------- */
+/* ---------- עטיפה למילים → שורות לפי מקס' תווים ---------- */
 function wrapParagraph(text, maxChars){
   const words = text.split(/\s+/);
   const lines = [];
   let cur = '';
   const push=()=>{ lines.push(cur); cur=''; };
-
   for (let w of words){
-    if (!w) continue;
-    if (cur.length===0){
-      if (w.length<=maxChars) cur=w;
-      else { // מילה ארוכה מאוד
-        while (w.length>maxChars){ lines.push(w.slice(0,maxChars)); w=w.slice(maxChars); }
-        cur=w;
-      }
+    if(!w) continue;
+    if(cur.length===0){
+      if(w.length<=maxChars) cur=w;
+      else { while(w.length>maxChars){ lines.push(w.slice(0,maxChars)); w=w.slice(maxChars);} cur=w; }
+    }else if(cur.length+1+w.length<=maxChars){
+      cur += ' '+w;
     }else{
-      if (cur.length+1+w.length<=maxChars) cur += ' '+w;
-      else {
-        push();
-        if (w.length<=maxChars) cur=w;
-        else { while (w.length>maxChars){ lines.push(w.slice(0,maxChars)); w=w.slice(maxChars); } cur=w; }
-      }
+      push();
+      if(w.length<=maxChars) cur=w;
+      else { while(w.length>maxChars){ lines.push(w.slice(0,maxChars)); w=w.slice(maxChars);} cur=w; }
     }
   }
-  if (cur) push();
+  if(cur) push();
   return lines;
 }
 
-/* -------- עימוד קשיח: 18 שורות לעמוד; תמונות = עמוד נפרד -------- */
+/* ---------- עימוד קשיח: N שורות לעמוד; תמונות = עמוד עצמאי ---------- */
 function paginate(tokens, metaHTML, charsPerLine){
   const pages = [];
   let buffer = [], used = 0;
@@ -142,14 +124,13 @@ function paginate(tokens, metaHTML, charsPerLine){
 
   if (metaHTML){ buffer.push(`<div class="date-banner">${metaHTML}</div>`); used += 1; }
 
-  let para = [];
-  const flushPara = ()=>{
-    if (!para.length) return;
-    const text = para.join(' ');
-    const wrapped = wrapParagraph(text, charsPerLine);
+  let para=[];
+  const flushPara=()=>{
+    if(!para.length) return;
+    const wrapped = wrapParagraph(para.join(' '), charsPerLine);
     for (const ln of wrapped){
       buffer.push(`<div class="ln">${esc(ln)}</div>`);
-      used += 1; if (used>=LINES_PER_PAGE) flush();
+      if(++used>=LINES_PER_PAGE) flush();
     }
     para=[];
   };
@@ -160,13 +141,13 @@ function paginate(tokens, metaHTML, charsPerLine){
 
     if (tk.type==='blank'){
       buffer.push('<div class="ln">&nbsp;</div>');
-      used += 1; if (used>=LINES_PER_PAGE) flush();
+      if(++used>=LINES_PER_PAGE) flush();
     } else if (tk.type==='hr'){
       buffer.push('<hr class="separator">');
-      used += 1; if (used>=LINES_PER_PAGE) flush();
+      if(++used>=LINES_PER_PAGE) flush();
     } else if (tk.type==='image'){
       if (buffer.length) flush();
-      pages.push(tk.html);             // עמוד תמונה עצמאי
+      pages.push(tk.html);  // תמונה כעמוד מלא
     }
   }
   flushPara();
@@ -174,25 +155,38 @@ function paginate(tokens, metaHTML, charsPerLine){
   return pages.length ? pages : [''];
 }
 
-/* -------- רינדור וניווט -------- */
+/* ---------- רינדור, רוחבים וניווט יציב ---------- */
 function clearTrack(){ const t=$('#track'); while(t.firstChild) t.removeChild(t.firstChild); }
 function buildPage(html){ const p=document.createElement('div'); p.className='page'; p.innerHTML=`<div class="page-card"><div class="page-inner">${html}</div></div>`; return p; }
-function renderPages(pages){ const t=$('#track'); clearTrack(); pages.forEach(h=>t.appendChild(buildPage(h))); }
-
+function renderPages(pages){
+  const t=$('#track'); clearTrack();
+  pages.forEach(h=>t.appendChild(buildPage(h)));
+}
+function sizePages(pagesLen){
+  const stageW = $('#stage').clientWidth || 1;
+  $('#track').style.width = `${pagesLen*stageW}px`;
+  document.querySelectorAll('#track .page').forEach(p=>{
+    p.style.flex='0 0 auto';
+    p.style.width = `${stageW}px`;
+    p.style.height='100%';
+  });
+  return stageW;
+}
 function enableNav(pages){
-  let idx=0, anim=false;
+  let idx=0, anim=false, stageW=sizePages(pages.length);
+
   const go = (i)=>{
     if (anim) return;
-    const target = Math.max(0, Math.min(pages.length-1, i));
-    idx = target;
-    const stageW = $('#stage').clientWidth || 1;
+    idx = Math.max(0, Math.min(pages.length-1, i));
     const tr = $('#track');
     tr.style.transition = 'transform 260ms ease';
+    tr.style.willChange = 'transform';
     tr.style.transform  = `translate3d(${-idx*stageW}px,0,0)`;
     anim=true;
     setCounter(idx, pages.length);
-    tr.addEventListener('transitionend', ()=>{ anim=false; }, {once:true});
+    tr.addEventListener('transitionend', ()=>{ anim=false; tr.style.willChange='auto'; }, {once:true});
   };
+
   $('#prev').onclick = ()=>go(idx-1);
   $('#next').onclick = ()=>go(idx+1);
 
@@ -207,21 +201,26 @@ function enableNav(pages){
     if(dy<60 && dt<600 && Math.abs(dx)>40){ if(dx<0) go(idx+1); else go(idx-1); }
   },{passive:true});
 
-  addEventListener('resize', ()=>go(idx));   // שומר יישור כשהרוחב משתנה
+  addEventListener('resize', ()=>{
+    stageW = sizePages(pages.length);
+    // שמור בעמוד נוכחי
+    $('#track').style.transition='none';
+    $('#track').style.transform=`translate3d(${-idx*stageW}px,0,0)`;
+    setCounter(idx, pages.length);
+  });
+
   go(0);
 }
 
-/* -------- parse date → weekday, month day -------- */
+/* ---------- תאריך "יום, חודש מספר" מודגש + שנה בנפרד ---------- */
 function formatDateStrong(s){
-  // מצפה לפורמט כמו "September 28, 1993" – מחשב weekday
-  let d = new Date(s);
+  const d = new Date(s);
   if (isNaN(d)) return { strong: esc(s), year: '' };
-  const fmtStrong = new Intl.DateTimeFormat('en-US', { weekday:'long', month:'long', day:'numeric' }).format(d);
-  const year = String(d.getFullYear());
-  return { strong: esc(fmtStrong), year: esc(year) };
+  const strong = new Intl.DateTimeFormat('en-US',{weekday:'long',month:'long',day:'numeric'}).format(d);
+  return { strong: esc(strong), year: String(d.getFullYear()) };
 }
 
-/* ---------------- MAIN ---------------- */
+/* ======================= MAIN ======================= */
 (async function init(){
   try{
     showLoading(true);
@@ -232,7 +231,7 @@ function formatDateStrong(s){
     const txtURL = `books/${slug}/book.txt`;
     let raw = await fetchText(txtURL);
 
-    // Place/Date בתחילת הקובץ
+    // Place/Date מההתחלה
     let place=null, dateStr=null;
     raw = raw.replace(/^(Place:\s*)(.+)\s*\r?\n/i, (_,p,v)=>{ place=v.trim(); return ''; });
     raw = raw.replace(/^(Date:\s*)(.+)\s*\r?\n/i,  (_,p,v)=>{ dateStr=v.trim(); return ''; });
@@ -241,9 +240,9 @@ function formatDateStrong(s){
 
     const parts = [];
     if (dateStr){
-      const {strong, year} = formatDateStrong(dateStr);
+      const {strong,year} = formatDateStrong(dateStr);
       parts.push(`<span class="date-strong">${strong}</span>`);
-      if (year) parts.push(`<span class="date-year">${year}</span>`);
+      if (year) parts.push(`<span class="date-year">${esc(year)}</span>`);
     }
     if (place){ parts.push(`<span class="pill">Place: ${esc(place)}</span>`); }
     const metaHTML = parts.join(' ');
@@ -255,7 +254,7 @@ function formatDateStrong(s){
     enableNav(pages);
   }catch(err){
     console.error(err);
-    renderPages([`<div class="ln">בעיה בטעינה</div><div class="ln">${esc(String(err))}</div>`]);
+    renderPages([`<div class="ln">שגיאה בטעינה</div><div class="ln">${esc(String(err))}</div>`]);
     setCounter(0,1);
   }finally{
     showLoading(false);
