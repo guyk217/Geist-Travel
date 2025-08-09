@@ -1,93 +1,146 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>Book Reader</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Book Reader</title>
 
-  <!-- פונט לכותרות + פונט קריא לגוף -->
-  <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Literata:opsz,wght@7..72,400;7..72,500&family=Rubik:wght@300;400;500&display=swap" rel="stylesheet">
+<!-- Fonts -->
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600&family=Literata:opsz,wght@7..72,400;7..72,500;7..72,700&display=swap" rel="stylesheet">
 
-  <link rel="stylesheet" href="css/site.css">
-  <style>
-    /* בסיס הקריאה – LTR, רוחב נוח, שבירת מילים וגלילה חלקה */
-    body { direction:ltr; }
-    .reader-wrap{
-      min-height:100svh;
-      background: var(--paper, #f4ead9);
-      position:relative;
-      overflow:hidden;
-    }
-    .topbar{
-      position:fixed; inset:0 0 auto 0; height:54px;
-      display:flex; align-items:center; justify-content:space-between;
-      padding:10px 14px; background:linear-gradient(#f4ead9, rgba(244,234,217,.65));
-      z-index:10;
-    }
-    .back{
-      background:#2f2f2f; color:#fff; border-radius:18px; padding:6px 14px;
-      font-family:"Rubik",system-ui; font-size:15px;
-    }
-    .pager{
-      font-family:"Rubik",system-ui; font-size:16px; color:#2f2f2f; margin-inline:10px;
-    }
+<style>
+  :root{
+    --bg:#F4EBDC;
+    --paper:#F3E6CF;
+    --ink:#2b2b2b;
+    --pill:#2f2f2f;
+    --accent: #5e4b3c;
+    --shadow: 0 10px 30px rgba(0,0,0,.08);
+    --gutter: clamp(18px, 4vw, 28px);
+    --max: 720px;
+  }
+  html,body{height:100%}
+  body.reader{
+    margin:0;
+    background: var(--bg) radial-gradient(ellipse at 50% -20%, rgba(0,0,0,.05), transparent 55%) no-repeat;
+    color:var(--ink);
+    font: 400 18px/1.64 "Literata", Georgia, "Times New Roman", serif;
+    direction:ltr;
+  }
+  .wrap{
+    height:100%;
+    display:grid;
+    grid-template-rows:auto 1fr auto;
+  }
+  /* header */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between;
+    padding: max(env(safe-area-inset-top),12px) var(--gutter) 8px;
+  }
+  .back{
+    border:none; background:#2f2f2f; color:#fff;
+    padding:.55rem .9rem; border-radius:999px; font-weight:600;
+    box-shadow: var(--shadow);
+  }
+  .pager{
+    font-weight:600; letter-spacing:.02em; color:#5a5249;
+  }
 
-    .canvas{
-      position:relative; height:100svh; scroll-snap-type:x mandatory;
-      display:flex; overflow-x:hidden;
-      touch-action:pan-y;  /* נבטל פאן אופקי כדי ללכוד סוויפ */
-    }
+  /* slider area */
+  .stage{
+    position:relative;
+    overflow:hidden;
+    padding: 6px 0;
+  }
+  .track{
+    height:100%;
+    display:flex;
+    transition: transform .35s ease;
+    will-change: transform;
+  }
+  .page{
+    flex: 0 0 100%;
+    overflow:auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 var(--gutter) max(env(safe-area-inset-bottom),32px);
+    display:flex; justify-content:center;
+  }
+  .page-inner{
+    width:100%;
+    max-width: var(--max);
+    background: var(--paper);
+    padding: clamp(18px,3.2vw,26px);
+    border-radius: 18px;
+    box-shadow: var(--shadow);
+    text-align:left;  /* שומר LTR */
+  }
+  .meta{
+    display:flex; flex-wrap:wrap; gap:10px; margin-bottom:12px;
+  }
+  .pill{
+    background:var(--pill); color:#fff; border-radius:999px;
+    padding:.45rem .8rem; font-size:.95rem; letter-spacing:.01em;
+  }
+  .content{
+    white-space:pre-wrap;
+    overflow-wrap:anywhere;
+    word-break:break-word;
+    hyphens:auto;
+  }
+  .content img{
+    max-width:100%;
+    height:auto;
+    display:block;
+    margin: 18px auto;
+    border-radius:12px;
+    box-shadow: var(--shadow);
+  }
+  .star-hr{
+    display:flex; align-items:center; gap:12px; margin: 18px 0;
+  }
+  .star-hr:before, .star-hr:after{
+    content:""; flex:1; height:1px; background:rgba(0,0,0,.12);
+  }
+  .star-hr .star{ font-family:"Caveat", cursive; font-size:22px; color:var(--accent) }
 
-    .page{
-      flex:0 0 100%; height:100%; scroll-snap-align:start;
-      display:flex; flex-direction:column; align-items:center;
-      padding:76px 14px 24px;  /* מקום לטופ-בר */
-    }
-    .page-inner{
-      width:min(860px, 92vw);
-      background:rgba(255,255,255,.0);
-      border-radius:12px;
-      text-align:left;
-      color:#2a2a2a;
-      font-family:"Literata", Georgia, serif;
-      font-size:clamp(16px, 14px + .6vw, 20px);
-      line-height:1.7;
-      overflow-wrap:anywhere; word-break:break-word; hyphens:auto;
-    }
-    .chips{
-      display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;
-    }
-    .chip{
-      background:#2f2f2f; color:#fff; padding:6px 12px; border-radius:22px;
-      font:500 14px "Rubik", system-ui;
-    }
-    .content{ white-space:pre-wrap; }
-    .content img{
-      display:block; max-width:100%; height:auto; border-radius:12px;
-      box-shadow:0 6px 22px rgba(0,0,0,.12); margin:16px auto;
-    }
-    .star-hr{ display:flex; align-items:center; gap:10px; margin:18px 0; opacity:.65;}
-    .star-hr::before,.star-hr::after{ content:""; flex:1 1 auto; height:1px; background:#b9a98e;}
-    .star-hr .star{ font-size:18px; color:#7e6b49;}
+  /* nav buttons */
+  .navbtns{
+    position:absolute; inset:auto var(--gutter) 18px var(--gutter);
+    display:flex; align-items:center; justify-content:space-between;
+    pointer-events:none;
+  }
+  .navbtns button{
+    pointer-events:auto;
+    border:none; background:#2f2f2f; color:#fff;
+    width:44px; height:44px; border-radius:12px;
+    box-shadow: var(--shadow); font-size:20px;
+  }
 
-    .hint{
-      position:fixed; inset:auto 0 8px 0; text-align:center;
-      font:400 14px "Rubik",system-ui; color:#83745a; opacity:.85;
-      pointer-events:none;
-    }
-  </style>
+  /* helper hint */
+  .hint{
+    text-align:center; color:#7a7368; font-size:.9rem;
+    padding: 4px 0 8px;
+  }
+</style>
 </head>
-<body>
-  <div class="reader-wrap">
-    <div class="topbar">
-      <button class="back" onclick="history.back()">חזרה</button>
-      <div class="pager" id="pager">1/1</div>
-    </div>
-
-    <div id="canvas" class="canvas" aria-live="polite"></div>
-    <div class="hint" id="hint">החלקה שמאלה/ימינה לדפדוף</div>
+<body class="reader">
+<div class="wrap">
+  <div class="topbar">
+    <button class="back" onclick="history.back()">חזרה</button>
+    <div class="pager" id="pager">1/1</div>
   </div>
 
-  <script src="js/reader.js"></script>
+  <div class="stage" id="stage">
+    <div class="track" id="track"></div>
+    <div class="navbtns">
+      <button id="prevBtn" aria-label="Previous">◀︎</button>
+      <button id="nextBtn" aria-label="Next">▶︎</button>
+    </div>
+  </div>
+
+  <div class="hint">החלקה שמאלה/ימינה לעמוד הבא • אפשר גם בכפתורים</div>
+</div>
+
+<script src="js/reader.js"></script>
 </body>
 </html>
