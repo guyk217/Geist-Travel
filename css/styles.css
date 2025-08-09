@@ -1,57 +1,37 @@
-:root{
-  --ink:#2a2a2a; --paper:#f7f1e3; --accent:#9c6b3d;
-  --shadow:rgba(0,0,0,.08); --border:#eadfcd; --pill:#fff3e3;
-}
-*{box-sizing:border-box}
-html,body{height:100%}
-body{margin:0;color:var(--ink);font-family:'Assistant',system-ui,-apple-system,segoe ui,roboto,arial;line-height:1.7}
-.bg-paper{
-  background:
-    radial-gradient(ellipse at top, rgba(255,255,255,.5), transparent 60%),
-    repeating-linear-gradient(0deg, rgba(0,0,0,.015), rgba(0,0,0,.015) 2px, transparent 2px, transparent 36px),
-    var(--paper);
+@font-face{
+  font-family:"Pilcrow Rounded";
+  src: local("Pilcrow Rounded"), local("PilcrowRounded");
+  font-display:swap;
 }
 
-/* header & home */
-.site-header{padding:48px 20px 24px;text-align:center}
-.brand{font-family:'Amatic SC', cursive;font-size:64px;margin:0;color:#3e2b18;text-shadow:0 1px 0 #fff}
-.tagline{margin:.25rem auto 0;max-width:750px;color:#5a4a3b}
-.container{max-width:1100px;margin:auto;padding:20px}
-.shelf{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:28px}
-.book-card{display:grid;grid-template-columns:140px 1fr;gap:16px;align-items:start;background:#fff9ef;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 20px var(--shadow);padding:14px}
-.cover{position:relative;display:block;border-radius:8px;border:1px solid var(--border);background:#fdf7ee;height:210px;display:grid;place-items:center;text-decoration:none}
-.txt-cover{width:86px;height:116px;border:2px dashed #c9b89a;border-radius:6px;display:grid;place-items:center;font-weight:700;color:#7b5a34;background:#fff}
-.ribbon{position:absolute;top:10px;left:10px;background:var(--accent);color:#fff;padding:4px 10px;border-radius:999px;font-size:.8rem}
-.meta .title{margin:.2rem 0;font-size:1.35rem}
-.meta .desc{margin:.3rem 0 .5rem;color:#4a4037}
-.chips{list-style:none;margin:0 0 .8rem;padding:0;display:flex;gap:8px;flex-wrap:wrap}
-.chips li{background:#fff;border:1px solid var(--border);border-radius:999px;padding:4px 10px;font-size:.85rem}
-.btn{display:inline-block;background:var(--accent);color:#fff;text-decoration:none;padding:.55rem 1rem;border-radius:8px;box-shadow:0 4px 14px var(--shadow)}
-.btn:hover{filter:brightness(.95)}
-.site-footer{padding:30px;text-align:center;color:#6a5a4b}
-
-/* reader */
-.reader{display:grid;grid-template-columns:1fr min(460px,36vw);gap:18px;align-items:start}
-.canvas,.panel{background:#fff;border:1px solid var(--border);border-radius:12px;box-shadow:0 10px 24px var(--shadow)}
-.canvas{padding:14px}
-.panel{padding:14px;max-height:calc(100dvh - 160px);overflow:auto}
-.section{display:grid;gap:10px;margin:14px 0;padding-bottom:12px;border-bottom:1px dashed #e3d3b9}
-.section:last-child{border-bottom:0}
-.meta{display:flex;gap:8px;flex-wrap:wrap}
-.pill{background:var(--pill);border:1px solid #e7cfb2;border-radius:999px;padding:4px 10px;font-size:.85rem;color:#5a4428}
-.body{direction:ltr;text-align:left;white-space:pre-wrap}
-.section img{width:100%;border:1px solid var(--border);border-radius:8px}
-
-/* decorative single-star divider (for lines with a single *) */
-.star-hr{display:flex;align-items:center;gap:12px;margin:16px 0;color:#a3845b;justify-content:center}
-.star-hr:before,.star-hr:after{content:"";height:1px;flex:1;background:linear-gradient(90deg,transparent,#d9c7ad,transparent)}
-.star-hr .star{font-size:18px;line-height:1}
-
-/* end marker */
-.hr-fancy{display:flex;align-items:center;gap:12px;margin:22px 0;color:#a3845b}
-.hr-fancy:before,.hr-fancy:after{content:"";height:1px;flex:1;background:linear-gradient(90deg,transparent,#d9c7ad,transparent)}
-
-@media (max-width:980px){
-  .reader{grid-template-columns:1fr}
-  .panel{order:-1}
+/* רקע דפי-מחברת */
+body{
+  margin:0; color:#222; background:#f7f2e8;
+  font: 18px/1.7 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
 }
+.container{ max-width:900px; margin:0 auto; padding:0 16px 80px; }
+.hero{ text-align:center; padding:22px 12px; }
+h1,h2,h3{ font-family:"Pilcrow Rounded", system-ui, sans-serif; margin:.2em 0; }
+.subtitle{ color:#6a6a6a; margin:6px 0 0; }
+
+.sections{ display:flex; flex-direction:column; gap:26px; }
+.section{
+  background:#fff; border-radius:16px; padding:18px 18px 8px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.08);
+}
+.meta{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+.pill{
+  background:#f0f3f7; color:#2a3a52;
+  padding:.25rem .6rem; border-radius:999px; font-size:.85rem; border:1px solid rgba(0,0,0,.06);
+}
+.body{ white-space:pre-wrap; word-break:break-word; }
+.body img{
+  display:block; width:100%; height:auto; margin:10px 0 8px; border-radius:10px;
+  box-shadow:0 8px 20px rgba(0,0,0,.10);
+}
+/* כוכבית בודדת */
+.star-hr{ display:flex; align-items:center; justify-content:center; margin:18px 0 10px; }
+.star-hr .star{ font-size:22px; opacity:.6; }
+
+/* RTL */
+html[dir="rtl"] .pill{ direction:rtl; }
