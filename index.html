@@ -1,232 +1,26 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<html lang="he" dir="rtl">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Family Travel Library</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Benjamin Geist’s Travels</title>
 
-  <!-- פונטים: כתב-יד לאנגלית + עברית נעימה לכותרות -->
-  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Noto+Sans+Hebrew:wght@400;600;700&display=swap" rel="stylesheet">
-
-  <style>
-    :root{
-      --paper:#fbf4e9;
-      --ink:#2b2b2b;
-      --accent:#9c7f56;
-      --line:#eadfcb;
-      --pill:#f0e7d6;
-      --shadow:0 10px 25px rgba(0,0,0,.08);
-      --radius:18px;
-    }
-    *{ box-sizing:border-box }
-    html,body{ height:100% }
-    body{
-      margin:0;
-      color:var(--ink);
-      background: 
-        linear-gradient(180deg, rgba(255,255,255,.6), rgba(255,255,255,.6)),
-        repeating-linear-gradient(#0000, #0000 36px, var(--line) 36px, var(--line) 37px),
-        var(--paper);
-      font-family: system-ui, -apple-system, "Noto Sans Hebrew", "Heebo", Arial, sans-serif;
-    }
-
-    .wrap{
-      max-width:980px;
-      padding:24px 18px 64px;
-      margin:0 auto;
-    }
-
-    /* כותרת נוסטלגית */
-    header{
-      text-align:center;
-      margin:18px 0 28px;
-    }
-    .title{
-      font-family:"Patrick Hand", cursive;
-      font-size: clamp(34px, 7vw, 64px);
-      margin:.1em 0 0;
-      letter-spacing:.5px;
-    }
-    .subtitle{
-      font-family:"Patrick Hand", cursive;
-      font-size: clamp(22px, 5.5vw, 42px);
-      color:#6b5b45;
-      margin:.15em 0 0;
-    }
-    /* כשזוהי כותרת בעברית – תן פונט עברי */
-    .is-hebrew{
-      font-family:"Noto Sans Hebrew", "Heebo", system-ui, sans-serif !important;
-      letter-spacing: .1px;
-      font-weight:700;
-    }
-
-    /* כרטיסים */
-    .grid{
-      display:grid;
-      grid-template-columns: repeat(auto-fill, minmax(260px,1fr));
-      gap:18px;
-      margin-top:10px;
-    }
-    .card{
-      background:#fff9f0;
-      border:1px solid #eadfcb;
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      overflow:hidden;
-      display:flex;
-      flex-direction:column;
-      transition: transform .15s ease, box-shadow .15s ease;
-    }
-    .card:hover{ transform:translateY(-2px); box-shadow:0 14px 28px rgba(0,0,0,.12) }
-
-    .cover{
-      aspect-ratio: 3/2;
-      width:100%;
-      object-fit:cover;
-      display:block;
-      background:#f5efe4;
-      border-bottom:1px solid #eadfcb;
-    }
-    .card-body{ padding:14px 14px 16px }
-    .card-title{
-      font-family:"Patrick Hand", cursive;
-      font-size:22px;
-      margin:0 0 2px;
-      line-height:1.15;
-    }
-    .card-title.is-hebrew{
-      font-family:"Noto Sans Hebrew", "Heebo", system-ui, sans-serif !important;
-      font-weight:700;
-      font-size:20px;
-    }
-    .card-sub{
-      color:#7a6b57;
-      font-size:14px;
-      margin-bottom:8px;
-    }
-    .desc{
-      color:#53493b;
-      font-size:14px;
-      line-height:1.45;
-      min-height:2.8em;
-    }
-
-    .pill{
-      display:inline-block;
-      background:var(--pill);
-      border:1px solid #e8dbc6;
-      color:#5b4a33;
-      border-radius:999px;
-      padding:4px 10px;
-      font-size:12px;
-      margin-right:6px;
-    }
-
-    a.card-link{ text-decoration:none; color:inherit }
-
-    footer{
-      margin-top:40px;
-      text-align:center;
-      color:#786750;
-      font-size:13px;
-    }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@400;700&family=Heebo:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/theme.css">
 </head>
-<body>
-  <div class="wrap">
-    <header>
-      <!-- הכותרת הראשית של הספרייה -->
-      <h1 class="title">Family Travel Library</h1>
-      <div class="subtitle is-hebrew">ספרים סרוקים של המשפחה</div>
-    </header>
+<body class="notebook">
 
-    <main>
-      <div id="grid" class="grid" aria-live="polite"></div>
-    </main>
+  <header class="home-hero">
+    <h1 class="home-title en">Benjamin Geist’s Travels</h1>
+    <p class="home-sub">נעשה באהבה לחלוק את הספרים למטה</p>
+  </header>
 
-    <footer>© The Family Library</footer>
-  </div>
+  <main id="books" class="books-list" aria-live="polite"></main>
 
-  <script>
-    // Helper: זיהוי עברית לשינוי פונט
-    const hasHebrew = s => /[\u0590-\u05FF]/.test(s || "");
+  <footer class="home-foot">
+    <a class="small-link" href="reader.html?book=europe-roots-1993">פתח את “Europe Roots Trip (1993)” ›</a>
+  </footer>
 
-    // טען את רשימת הספרים
-    async function loadBooks(){
-      try{
-        const res = await fetch('books/books.json', {cache:'no-store'});
-        if(!res.ok) throw new Error('books.json not found');
-        const books = await res.json();
-
-        const grid = document.getElementById('grid');
-        grid.innerHTML = '';
-
-        books.forEach(b=>{
-          const a = document.createElement('a');
-          a.className = 'card-link';
-          a.href = `reader.html?book=${encodeURIComponent(b.slug)}`;
-
-          const card = document.createElement('article');
-          card.className = 'card';
-
-          const img = document.createElement('img');
-          img.className = 'cover';
-          img.alt = b.title || '';
-          img.loading = 'lazy';
-          img.src = (b.cover && b.cover.trim()) ? b.cover : 'assets/placeholder-cover.jpg';
-          card.appendChild(img);
-
-          const body = document.createElement('div');
-          body.className = 'card-body';
-
-          const h = document.createElement('h2');
-          h.className = 'card-title';
-          h.textContent = b.title || 'Untitled';
-          if (hasHebrew(h.textContent)) h.classList.add('is-hebrew');
-          body.appendChild(h);
-
-          if (b.subtitle){
-            const sub = document.createElement('div');
-            sub.className = 'card-sub';
-            sub.textContent = b.subtitle;
-            body.appendChild(sub);
-          }
-
-          const tags = document.createElement('div');
-          if (b.place){
-            const p = document.createElement('span');
-            p.className='pill';
-            p.textContent = `Place: ${b.place}`;
-            tags.appendChild(p);
-          }
-          if (b.year){
-            const y = document.createElement('span');
-            y.className='pill';
-            y.textContent = b.year;
-            tags.appendChild(y);
-          }
-          if (tags.childElementCount) body.appendChild(tags);
-
-          if (b.description){
-            const d = document.createElement('div');
-            d.className = 'desc';
-            d.textContent = b.description;
-            body.appendChild(d);
-          }
-
-          card.appendChild(body);
-          a.appendChild(card);
-          grid.appendChild(a);
-        });
-
-      }catch(e){
-        console.error(e);
-        document.getElementById('grid').innerHTML =
-          '<div class="desc">Could not load books.json</div>';
-      }
-    }
-
-    loadBooks();
-  </script>
+  <script src="js/home.js"></script>
 </body>
 </html>
