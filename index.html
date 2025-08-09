@@ -3,25 +3,118 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Geist Family Library</title>
-  <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Assistant:wght@300;400;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/styles.css">
+  <title>Geist Travel • ספרי משפחה</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Heebo:wght@300;600&display=swap" rel="stylesheet">
+  <style>
+    :root{
+      --paper:#f8f3e7;
+      --ink:#2b2623;
+      --accent:#6c8a8f;
+      --line:#e7dfcf;
+      --pill:#f0eadf;
+    }
+    html,body{height:100%;}
+    body{
+      margin:0;
+      color:var(--ink);
+      background:
+        repeating-linear-gradient(#0000 0 36px,var(--line) 36px 37px),
+        radial-gradient(1200px 500px at 50% -200px,#fff8ef,#f5eee2 55%,#efe6d7);
+      font-family:'Heebo', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      line-height:1.6;
+    }
+    .wrap{max-width:880px;margin:0 auto;padding:28px;}
+    header{
+      text-align:center;
+      margin:18px 0 6px;
+      font-family:'Patrick Hand', cursive;
+    }
+    h1{
+      margin:0;
+      font-size:clamp(36px,8vw,72px);
+      letter-spacing:.06em;
+    }
+    .sub{margin-top:6px;color:#6a645d;font-weight:600}
+    .shelf{
+      margin-top:28px;display:grid;gap:16px;
+      grid-template-columns:repeat(auto-fit,minmax(240px,1fr));
+    }
+    .card{
+      background:linear-gradient(#fffdf9,#fbf3e6);
+      border:1px solid #e8dfcf;border-radius:16px;
+      box-shadow:0 2px 0 #e6dccd, 0 8px 22px rgba(0,0,0,.05);
+      padding:18px 18px 16px;
+      display:flex;flex-direction:column;justify-content:space-between;
+      transition:transform .08s ease, box-shadow .08s ease;
+    }
+    .card:hover{transform:translateY(-2px);box-shadow:0 2px 0 #e6dccd,0 14px 28px rgba(0,0,0,.08)}
+    .title{font-family:'Patrick Hand',cursive;font-size:28px;margin:0 0 4px}
+    .meta{display:flex;gap:8px;flex-wrap:wrap;margin:6px 0 10px}
+    .pill{
+      background:var(--pill);border:1px solid #e7dfcf;border-radius:999px;
+      padding:2px 10px;font-size:13px;white-space:nowrap
+    }
+    .desc{color:#5b564f;font-size:14px;min-height:42px}
+    .cta{margin-top:14px;display:flex;justify-content:flex-end}
+    .btn{
+      background:#2c2a27;color:#fff;border:0;border-radius:999px;
+      padding:8px 14px;font-weight:600;cursor:pointer;text-decoration:none
+    }
+    footer{margin:38px 0 6px;text-align:center;color:#847d71;font-size:13px}
+  </style>
 </head>
-<body class="bg-paper">
-  <header class="site-header">
-    <h1 class="brand">ספריית משפחת גייסט</h1>
-    <p class="tagline">מסעות, יומנים ותמונות — במהדורה דיגיטלית משפחתית</p>
-  </header>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>ספרי מסע של המשפחה</h1>
+      <div class="sub">ארכיון קטן של טיולים, יומנים ותמונות</div>
+    </header>
 
-  <main class="container">
-    <section id="shelf" class="shelf"></section>
-  </main>
+    <div id="shelf" class="shelf" aria-live="polite"></div>
 
-  <footer class="site-footer">
-    <p>© <span id="year"></span></p>
-  </footer>
+    <footer>נבנה באהבה • GitHub Pages</footer>
+  </div>
 
-  <script src="js/utils.js"></script>
-  <script src="js/home.js"></script>
+  <script>
+    async function loadJSON(url){
+      const r = await fetch(url, {cache:'no-store'});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
+    }
+    function card(b){
+      const el = document.createElement('article');
+      el.className='card';
+      el.innerHTML = `
+        <div>
+          <h2 class="title">${b.title || b.slug}</h2>
+          <div class="meta">
+            ${b.place ? `<span class="pill">מקום: ${b.place}</span>`:''}
+            ${b.year  ? `<span class="pill">שנה: ${b.year}</span>`:''}
+            ${b.pages ? `<span class="pill">${b.pages} עמודים</span>`:''}
+          </div>
+          <div class="desc">${b.description || ''}</div>
+        </div>
+        <div class="cta">
+          <a class="btn" href="reader.html?book=${encodeURIComponent(b.slug)}">לקריאה</a>
+        </div>`;
+      return el;
+    }
+
+    (async () => {
+      const shelf = document.getElementById('shelf');
+      try{
+        const data = await loadJSON('books/books.json');
+        if(!Array.isArray(data) || !data.length){
+          shelf.innerHTML = '<div class="card"><div class="desc">אין עדיין ספרים. הוסף תיקייה תחת <b>books/</b> ועדכן <b>books/books.json</b>.</div></div>';
+          return;
+        }
+        data.forEach(b => shelf.appendChild(card(b)));
+      }catch(e){
+        console.error(e);
+        shelf.innerHTML = '<div class="card"><div class="desc">שגיאה בטעינת רשימת הספרים.</div></div>';
+      }
+    })();
+  </script>
 </body>
 </html>
