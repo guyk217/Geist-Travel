@@ -1,15 +1,14 @@
 // Reader – עימוד לפי מספר שורות קבוע + טעינה עם רקע מחברת
-// book.txt נטען מתוך books/<slug>/book.txt, תמונות ב books/<slug>/images/image-N.(jpg|jpeg|png|webp)
+// book.txt נטען מתוך books/<slug>/book.txt, תמונות ב books/<slug>/(images|image)/image-N.(jpg|jpeg|png|webp)
 
-const EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+const EXTENSIONS = ['.jpg', '.JPG', '.jpeg', '.JPEG', '.png', '.webp'];
 
-// ---- פרמטרי עימוד קבועים (תוכל לכוון אם תרצה) ----
-const LINES_PER_PAGE   = 22;   // כמה "שורות" בעמוד
-const CHARS_PER_LINE   = 56;   // ממוצע תווים לשורה
-const IMG_LINE_WEIGHT  = 18;   // משקל תמונה בעמוד (בשורות)
-const HR_LINE_WEIGHT   = 2;    // משקל מפריד ****** (בשורות)
+// ---- פרמטרי עימוד (מעודכן: פחות שורות בעמוד) ----
+const LINES_PER_PAGE   = 16;   // ↓ היה 22
+const CHARS_PER_LINE   = 56;
+const IMG_LINE_WEIGHT  = 18;
+const HR_LINE_WEIGHT   = 2;
 
-// -------- עזרות קטנות --------
 function qs(name){
   const v = new URLSearchParams(location.search).get(name);
   return v ? decodeURIComponent(v) : null;
@@ -26,6 +25,7 @@ async function fetchText(url){
   return await r.text();
 }
 async function probeImage(base){
+  // מנסה את כל הסיומות (כולל .jpg באותיות קטנות/גדולות)
   for(const ext of EXTENSIONS){
     const url = `${base}${ext}`;
     const ok = await new Promise(res=>{
@@ -38,11 +38,18 @@ async function probeImage(base){
   return null;
 }
 async function hydrateImages(raw, imgDir){
+  // תמיכה גם בתיקייה images/ וגם image/
+  const altDir = imgDir.endsWith('/images') ? imgDir.replace(/\/images$/, '/image') : imgDir;
+
   const jobs = [];
   const withPh = raw.replace(/\{image-(\d+)\}/g, (m,n)=>{
     const ph = `@@IMG_${n}@@`;
     jobs.push((async ()=>{
-      const src = await probeImage(`${imgDir}/image-${n}`);
+      // ננסה קודם images/, ואז image/
+      const src =
+        (await probeImage(`${imgDir}/image-${n}`)) ||
+        (await probeImage(`${altDir}/image-${n}`));
+
       const html = src ? `<img src="${src}" alt="image-${n}">`
                        : `<div class="pill">Missing image ${n}</div>`;
       return {ph, html};
@@ -65,24 +72,21 @@ function textToHTML(text){
   }).join('\n');
 }
 
-// -------- עימוד לפי “שורות” --------
-// אנחנו מפרקים ל"טוקנים": טקסט, <img>, <hr>. לכל אחד משקל בשורות.
+// ---- עימוד לפי “שורות” ----
 function tokenize(html){
   const tokens = [];
   html.split(/(<img[^>]+>|<hr class="separator">)/g).forEach(part=>{
     if(!part) return;
     if(/^<img/i.test(part)) tokens.push({kind:'img', html:part, w:IMG_LINE_WEIGHT});
     else if(/^<hr/i.test(part)) tokens.push({kind:'hr', html:part, w:HR_LINE_WEIGHT});
-    else tokens.push({kind:'txt', html:part}); // טקסט "נטו"
+    else tokens.push({kind:'txt', html:part});
   });
   return tokens;
 }
 function weightOfText(txt){
-  // מסירים תגיות (ליתר ביטחון) וסופרים תווים
   const clean = txt.replace(/<[^>]+>/g,'');
   const chars = clean.length;
-  const lines = Math.ceil(chars / CHARS_PER_LINE);
-  return Math.max(0, lines);
+  return Math.ceil(chars / CHARS_PER_LINE);
 }
 function paginateByLines(html){
   const tokens = tokenize(html);
@@ -99,20 +103,17 @@ function paginateByLines(html){
   for(const tk of tokens){
     if(tk.kind === 'txt'){
       if(!tk.html.trim()){ curHTML += tk.html; continue; }
-      // חותכים טקסט ל"נתחים" שלא יעברו קיבולת העמוד
       let remaining = tk.html;
       while(remaining){
         const room = LINES_PER_PAGE - curLines;
         if(room <= 0){ pushPage(); continue; }
 
-        // כמה תווים אפשר בעמוד הנוכחי?
         const charsRoom = room * CHARS_PER_LINE;
         if(remaining.length <= charsRoom){
           curHTML += remaining;
           curLines += weightOfText(remaining);
           remaining = '';
         }else{
-          // חותכים בקירוב, מנסים לעצור בשבירת מילה הגיונית
           let cut = remaining.slice(0, charsRoom);
           const lastSpace = cut.lastIndexOf(' ');
           if(lastSpace > charsRoom * 0.6) cut = cut.slice(0, lastSpace);
@@ -123,9 +124,8 @@ function paginateByLines(html){
         }
       }
     }else{
-      // בלוק עם משקל קבוע (תמונה/HR)
       const w = tk.w;
-      if(w > LINES_PER_PAGE){ // בלוק ענק – לבד בעמוד
+      if(w > LINES_PER_PAGE){
         if(curLines>0) pushPage();
         curHTML += tk.html;
         pushPage();
@@ -137,11 +137,10 @@ function paginateByLines(html){
     }
   }
   if(curHTML.trim() || !pages.length) pushPage();
-
   return pages;
 }
 
-// -------- הצגה / ניווט --------
+// ---- הצגה / ניווט ----
 function buildPage(html){
   const p   = document.createElement('div'); p.className='page';
   const card= document.createElement('div'); card.className='page-card';
@@ -151,7 +150,6 @@ function buildPage(html){
   return p;
 }
 function clear(el){ while(el.firstChild) el.removeChild(el.firstChild); }
-
 function enableSwipe(onLeft, onRight){
   const el = document.getElementById('stage');
   let x0=null, y0=null, t0=0;
@@ -170,7 +168,7 @@ function enableSwipe(onLeft, onRight){
   },{passive:true});
 }
 
-// -------- טעינה --------
+// ---- Loader ----
 function showLoader(msg='טוען את הספר…'){
   let el = document.getElementById('loader');
   if(!el){
@@ -192,7 +190,7 @@ function hideLoader(){
   if(el) el.style.display='none';
 }
 
-// -------- main --------
+// ---- main ----
 (async function init(){
   try{
     const slug = qs('book');
@@ -207,7 +205,7 @@ function hideLoader(){
     showLoader('מטפל בתמונות…');
     raw = await hydrateImages(raw, imgDir);
 
-    // Place/Date בתחילת הקובץ (רשות)
+    // Place / Date (רשות)
     let place=null, date=null;
     raw = raw.replace(/^(Place:\s*)(.+)\s*\r?\n/i, (_,p,v)=>{ place=v.trim(); return ''; });
     raw = raw.replace(/^(Date:\s*)(.+)\s*\r?\n/i,  (_,p,v)=>{ date =v.trim(); return ''; });
@@ -221,7 +219,6 @@ function hideLoader(){
     showLoader('מעצב עמודים…');
     const pagesHTML = paginateByLines(html);
 
-    // ציור
     hideLoader();
     clear(track);
     for(const h of pagesHTML) track.appendChild(buildPage(h));
@@ -231,18 +228,15 @@ function hideLoader(){
     const go = (i)=>{
       index = Math.max(0, Math.min(total-1, i));
       const pageW = document.getElementById('stage').clientWidth;
-      const x = -index * pageW;
       track.style.transition = 'transform 260ms ease';
-      track.style.transform  = `translate3d(${x}px,0,0)`;
+      track.style.transform  = `translate3d(${-index*pageW}px,0,0)`;
       setCounter(index, total);
     };
     setCounter(index, total);
     document.getElementById('prev').onclick = ()=>go(index-1);
     document.getElementById('next').onclick = ()=>go(index+1);
     enableSwipe(()=>go(index-1), ()=>go(index+1));
-
-    // התאמת רוחב בעת שינוי גודל (לא מחשב מחדש עמודים כי הם קבועים לפי “שורות”)
-    addEventListener('resize', ()=> go(index));
+    addEventListener('resize', ()=>go(index));
 
   }catch(err){
     hideLoader();
