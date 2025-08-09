@@ -154,7 +154,33 @@ h1,h2,h3{
   .book-card{ flex-direction:column; align-items:stretch; text-align:justify; }
   .book-thumb{ align-self:flex-end; }
 }
+/* טקסט אנגלי: LTR ושוליים נדיבים */
+.page-inner {
+  direction: ltr;
+  text-align: left;
+  font-family: "EB Garamond", Georgia, "Times New Roman", serif; /* נעים יותר */
+  font-size: 18px;
+  line-height: 1.7;
+  padding: 24px 22px 28px 26px;     /* עוד ריווח מימין */
+  color: #2c2a27;
+}
 
+/* קו מפריד עבור ****** */
+hr.separator {
+  border: none;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #b7a98f, transparent);
+  margin: 18px 0;
+}
+
+/* עימוד אופקי */
+#stage { overflow: hidden; position: relative; }
+#track { display: flex; will-change: transform; }
+.page  { flex: 0 0 auto; }
+.page .content img { width: 100%; height: auto; border-radius: 8px; margin: 10px 0; }
+
+/* חיצים מושבתים */
+.nav button[disabled] { opacity: .35; pointer-events: none; }
 /* פוטר קטן */
 .home-foot{
   padding:16px; text-align:center; opacity:.75;
