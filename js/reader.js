@@ -1,9 +1,9 @@
-// Reader v2.3 — דפדוף יציב, 18 שורות לעמוד, תמונות JPG כעמוד נפרד, טעינה עדינה
-const LINES_PER_PAGE = 18;          // שנה כאן אם תרצה
-const IMG_EXT = '.jpg';
+// Reader v2.4 — 18 שורות, דפדוף יציב, ותמונות נטענות רק לעמוד הנוכחי/הבא.
+// כלל סיומות: image-1 → .jpg תחילה; כל השאר → .jpeg תחילה; עם fallback אוטומטי.
+
+const LINES_PER_PAGE = 18;
 const qs = k => new URLSearchParams(location.search).get(k);
 const $  = s => document.querySelector(s);
-
 const esc = s=>s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 function setCounter(i,total){
@@ -12,7 +12,7 @@ function setCounter(i,total){
   $('#next').disabled = (i>=total-1);
 }
 
-/* ---------- שכבת טעינה עדינה בתוך ה-stage ---------- */
+/* ---------- שכבת טעינה קטנה ---------- */
 (function ensureOverlay(){
   if ($('#reader-aux-css')) return;
   const style = document.createElement('style');
@@ -25,10 +25,8 @@ function setCounter(i,total){
     #loadingOverlay .bubble{
       background:#2f2a26;color:#fff;padding:.6rem 1.1rem;border-radius:999px;
       box-shadow:0 10px 28px rgba(0,0,0,.18)
-    }
-  `;
+    }`;
   document.head.appendChild(style);
-
   const ov = document.createElement('div');
   ov.id='loadingOverlay';
   ov.innerHTML = `<div class="bubble">טוען את הספר…</div>`;
@@ -42,7 +40,7 @@ async function fetchText(url){
   return r.text();
 }
 
-/* ---------- חישוב תווים לשורה לפי רוחב .page-inner האמיתי ---------- */
+/* ---------- חישוב תווים לשורה לפי רוחב הפונט בפועל ---------- */
 function calcCharsPerLine(){
   const stage = $('#stage');
   const page  = document.createElement('div'); page.className='page'; page.style.visibility='hidden';
@@ -58,54 +56,41 @@ function calcCharsPerLine(){
   const ctx = canvas.getContext('2d'); ctx.font = font;
 
   const sample = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz .,;:!?\'"()[]{}-–—0123456789';
-  const repeated = sample.repeat(8);
-  const pxPerChar = ctx.measureText(repeated).width / repeated.length;
+  const pxPerChar = ctx.measureText(sample.repeat(8)).width / (sample.length*8);
 
   stage.removeChild(page);
-  const chars = Math.max(24, Math.min(140, Math.floor(innerWidth / pxPerChar) - 2));
-  return chars;
+  return Math.max(24, Math.min(140, Math.floor(innerWidth / pxPerChar) - 2));
 }
 
-/* ---------- המרה לטוקנים: טקסט/ריק/מפריד/תמונה ---------- */
-function tokenize(raw, slug) {
+/* ---------- עוזרי תאריך ---------- */
+function formatDateStrong(s){
+  const d = new Date(s);
+  if (isNaN(d)) return { strong: esc(s), year: '' };
+  const strong = new Intl.DateTimeFormat('en-US',{weekday:'long',month:'long',day:'numeric'}).format(d);
+  return { strong: esc(strong), year: String(d.getFullYear()) };
+}
+
+/* ---------- Tokenize: שורות/ריק/מפריד/תמונה (בלי לטעון תמונות עדיין) ---------- */
+function tokenize(raw, slug){
   const exp = raw.replace(/\{image-(\d+)\}/g, '\n[IMG:$1]\n');
   const rows = exp.split(/\r?\n/);
-  const tokens = [];
-
-  for (const r of rows) {
-    if (/^\[IMG:(\d+)\]$/.test(r)) {
-      const n = parseInt(r.match(/^\[IMG:(\d+)\]$/)[1], 10);
-      const basePath = `books/${slug}/images/image-${n}`;
-
-      // קבע סיומת ראשית לפי אם זה הקאבר או לא
-      const primaryExt = (n === 1) ? 'jpg' : 'jpeg';
-      const fallbackExt = (primaryExt === 'jpg') ? 'jpeg' : 'jpg';
-
-      const html = `
-        <figure style="margin:0;display:flex;align-items:center;justify-content:center;height:100%;">
-          <img 
-            src="${basePath}.${primaryExt}"
-            alt="image-${n}" 
-            loading="lazy" 
-            decoding="async"
-            onerror="this.onerror=null; this.src='${basePath}.${fallbackExt}';"
-            style="max-width:100%;max-height:100%;border-radius:8px;display:block"
-          >
-        </figure>`;
-
-      tokens.push({ type: 'image', html });
-    } else if (/^\*{6,}\s*$/.test(r)) {
-      tokens.push({ type: 'hr' });
-    } else if (/^\s*$/.test(r)) {
-      tokens.push({ type: 'blank' });
+  const tokens=[];
+  for (const r of rows){
+    if (/^\[IMG:(\d+)\]$/.test(r)){
+      const n = parseInt(r.match(/^\[IMG:(\d+)\]$/)[1],10);
+      tokens.push({type:'image', n});
+    } else if (/^\*{6,}\s*$/.test(r)){
+      tokens.push({type:'hr'});
+    } else if (/^\s*$/.test(r)){
+      tokens.push({type:'blank'});
     } else {
-      tokens.push({ type: 'line', text: r });
+      tokens.push({type:'line', text:r});
     }
   }
   return tokens;
 }
 
-/* ---------- עטיפה למילים → שורות לפי מקס' תווים ---------- */
+/* ---------- עטיפת מילים → שורות ---------- */
 function wrapParagraph(text, maxChars){
   const words = text.split(/\s+/);
   const lines = [];
@@ -128,22 +113,23 @@ function wrapParagraph(text, maxChars){
   return lines;
 }
 
-/* ---------- עימוד קשיח: N שורות לעמוד; תמונות = עמוד עצמאי ---------- */
+/* ---------- עימוד קשיח: 18 שורות; תמונות = עמוד עצמאי (עם מטא בנפרד) ---------- */
+// נחזיר מערך עמודים: כל איבר הוא {kind:'html'|'image', html? , n?}
 function paginate(tokens, metaHTML, charsPerLine){
   const pages = [];
   let buffer = [], used = 0;
 
-  const flush = ()=>{ pages.push(buffer.join('\n')); buffer=[]; used=0; };
+  const pushHTML = () => { pages.push({kind:'html', html: buffer.join('\n') || '<br>'}); buffer=[]; used=0; };
 
   if (metaHTML){ buffer.push(`<div class="date-banner">${metaHTML}</div>`); used += 1; }
 
   let para=[];
-  const flushPara=()=>{
+  const flushPara = ()=>{
     if(!para.length) return;
     const wrapped = wrapParagraph(para.join(' '), charsPerLine);
     for (const ln of wrapped){
       buffer.push(`<div class="ln">${esc(ln)}</div>`);
-      if(++used>=LINES_PER_PAGE) flush();
+      if(++used>=LINES_PER_PAGE) pushHTML();
     }
     para=[];
   };
@@ -154,27 +140,50 @@ function paginate(tokens, metaHTML, charsPerLine){
 
     if (tk.type==='blank'){
       buffer.push('<div class="ln">&nbsp;</div>');
-      if(++used>=LINES_PER_PAGE) flush();
+      if(++used>=LINES_PER_PAGE) pushHTML();
     } else if (tk.type==='hr'){
       buffer.push('<hr class="separator">');
-      if(++used>=LINES_PER_PAGE) flush();
+      if(++used>=LINES_PER_PAGE) pushHTML();
     } else if (tk.type==='image'){
-      if (buffer.length) flush();
-      pages.push(tk.html);  // תמונה כעמוד מלא
+      if (buffer.length) pushHTML();
+      pages.push({kind:'image', n: tk.n});
     }
   }
   flushPara();
-  if (buffer.length) flush();
-  return pages.length ? pages : [''];
+  if (buffer.length) pushHTML();
+
+  return pages.length ? pages : [{kind:'html', html:'<br>'}];
 }
 
-/* ---------- רינדור, רוחבים וניווט יציב ---------- */
+/* ---------- בניית DOM (תמונות כ-Placeholder עם data בלבד) ---------- */
 function clearTrack(){ const t=$('#track'); while(t.firstChild) t.removeChild(t.firstChild); }
-function buildPage(html){ const p=document.createElement('div'); p.className='page'; p.innerHTML=`<div class="page-card"><div class="page-inner">${html}</div></div>`; return p; }
-function renderPages(pages){
-  const t=$('#track'); clearTrack();
-  pages.forEach(h=>t.appendChild(buildPage(h)));
+function pageHTML(content){ return `<div class="page-card"><div class="page-inner">${content}</div></div>`; }
+function pageImagePlaceholder(slug, n){
+  // לא טוענים src כאן! נטען רק כשנגיע לעמוד.
+  const prefer = (n===1) ? 'jpg' : 'jpeg';
+  const alt = `image-${n}`;
+  return `
+    <div class="page-card"><div class="page-inner" style="display:flex;align-items:center;justify-content:center">
+      <figure style="margin:0;max-width:100%;max-height:100%;display:flex;align-items:center;justify-content:center;width:100%;height:100%;">
+        <img data-slug="${slug}" data-n="${n}" data-loaded="0" data-prefer="${prefer}"
+             alt="${esc(alt)}" style="max-width:100%;max-height:100%;border-radius:8px;display:block">
+      </figure>
+    </div></div>`;
 }
+
+function renderPages(pages, slug){
+  const t = $('#track');
+  clearTrack();
+  pages.forEach(p=>{
+    const div = document.createElement('div');
+    div.className='page';
+    if (p.kind==='html') div.innerHTML = pageHTML(p.html);
+    else div.innerHTML = pageImagePlaceholder(slug, p.n);
+    t.appendChild(div);
+  });
+}
+
+/* ---------- ניהול רוחבים וניווט ---------- */
 function sizePages(pagesLen){
   const stageW = $('#stage').clientWidth || 1;
   $('#track').style.width = `${pagesLen*stageW}px`;
@@ -185,7 +194,45 @@ function sizePages(pagesLen){
   });
   return stageW;
 }
-function enableNav(pages){
+
+// חישוב URL לפי כללי הסיומות (עם fallback הפוך)
+function imageUrlFor(slug, n, step=0){
+  const prefer = (n===1) ? 'jpg' : 'jpeg';
+  const alt    = (prefer==='jpg') ? 'jpeg' : 'jpg';
+  const ext = (step===0 ? prefer : alt);
+  return `books/${slug}/images/image-${n}.${ext}`;
+}
+
+function loadImageForPage(idx, slug, pages){
+  const page = document.querySelectorAll('#track .page')[idx];
+  if (!page) return;
+  const img = page.querySelector('img[data-loaded="0"]');
+  if (!img) return; // כבר נטען או שזה עמוד טקסט
+
+  const n = parseInt(img.dataset.n, 10);
+  img.dataset.loaded = '1'; // נסמן כדי לא לנסות שוב ושוב
+
+  let step = 0;
+  const trySrc = ()=>{
+    const url = imageUrlFor(slug, n, step);
+    img.onerror = ()=>{
+      if (step===0){ step=1; trySrc(); }
+    };
+    img.loading = 'lazy';
+    img.decoding = 'async';
+    img.src = url;
+  };
+  trySrc();
+}
+
+function ensureImagesAround(index, slug, pages){
+  // נטען רק את העמוד הנוכחי והסמוך (הבא + קודם)
+  loadImageForPage(index, slug, pages);
+  loadImageForPage(index+1, slug, pages);
+  loadImageForPage(index-1, slug, pages);
+}
+
+function enableNav(pages, slug){
   let idx=0, anim=false, stageW=sizePages(pages.length);
 
   const go = (i)=>{
@@ -197,6 +244,7 @@ function enableNav(pages){
     tr.style.transform  = `translate3d(${-idx*stageW}px,0,0)`;
     anim=true;
     setCounter(idx, pages.length);
+    ensureImagesAround(idx, slug, pages);
     tr.addEventListener('transitionend', ()=>{ anim=false; tr.style.willChange='auto'; }, {once:true});
   };
 
@@ -216,21 +264,14 @@ function enableNav(pages){
 
   addEventListener('resize', ()=>{
     stageW = sizePages(pages.length);
-    // שמור בעמוד נוכחי
     $('#track').style.transition='none';
     $('#track').style.transform=`translate3d(${-idx*stageW}px,0,0)`;
     setCounter(idx, pages.length);
+    ensureImagesAround(idx, slug, pages);
   });
 
+  // התחלה
   go(0);
-}
-
-/* ---------- תאריך "יום, חודש מספר" מודגש + שנה בנפרד ---------- */
-function formatDateStrong(s){
-  const d = new Date(s);
-  if (isNaN(d)) return { strong: esc(s), year: '' };
-  const strong = new Intl.DateTimeFormat('en-US',{weekday:'long',month:'long',day:'numeric'}).format(d);
-  return { strong: esc(strong), year: String(d.getFullYear()) };
 }
 
 /* ======================= MAIN ======================= */
@@ -239,7 +280,7 @@ function formatDateStrong(s){
     showLoading(true);
 
     const slug = qs('book');
-    if(!slug){ renderPages(['Missing ?book=']); setCounter(0,1); showLoading(false); return; }
+    if(!slug){ renderPages([{kind:'html', html:'Missing ?book='}], ''); setCounter(0,1); showLoading(false); return; }
 
     const txtURL = `books/${slug}/book.txt`;
     let raw = await fetchText(txtURL);
@@ -261,13 +302,13 @@ function formatDateStrong(s){
     const metaHTML = parts.join(' ');
 
     const tokens = tokenize(raw, slug);
-    const pages  = paginate(tokens, metaHTML, charsPerLine);
+    const pages  = paginate(tokens, metaHTML, charsPerLine); // [{kind, html|n}]
 
-    renderPages(pages);
-    enableNav(pages);
+    renderPages(pages, slug);
+    enableNav(pages, slug);
   }catch(err){
     console.error(err);
-    renderPages([`<div class="ln">שגיאה בטעינה</div><div class="ln">${esc(String(err))}</div>`]);
+    renderPages([{kind:'html', html:`<div class="ln">שגיאה בטעינה</div><div class="ln">${esc(String(err))}</div>`}], '');
     setCounter(0,1);
   }finally{
     showLoading(false);
