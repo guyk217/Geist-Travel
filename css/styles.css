@@ -165,14 +165,14 @@ h1,h2,h3{
 .page  { flex: 0 0 auto; }
 
 /* טקסט אנגלי */
-.page-inner {
-  direction: ltr;
-  text-align: left;
-  font-family: "EB Garamond", Georgia, "Times New Roman", serif;
-  font-size: 16.5px;      /* קטן יותר */
-  line-height: 1.75;
-  padding: 22px 20px 26px 22px;
-  color: #2c2a27;
+.page-inner{
+  direction:ltr;
+  text-align:left;
+  font-family:"Kalam", "EB Garamond", Georgia, "Times New Roman", serif;
+  font-size:17px;             /* קטן ועדין יותר */
+  line-height:1.85;
+  padding:22px 20px 26px 22px;
+  color:#2c2a27;
 }
 
 .page .content img{
