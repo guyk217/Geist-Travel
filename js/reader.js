@@ -67,26 +67,39 @@ function calcCharsPerLine(){
 }
 
 /* ---------- המרה לטוקנים: טקסט/ריק/מפריד/תמונה ---------- */
-function tokenize(raw, slug){
+function tokenize(raw, slug) {
   const exp = raw.replace(/\{image-(\d+)\}/g, '\n[IMG:$1]\n');
   const rows = exp.split(/\r?\n/);
-  const tokens=[];
-  for (const r of rows){
-    if (/^\[IMG:(\d+)\]$/.test(r)){
-      const n = r.match(/^\[IMG:(\d+)\]$/)[1];
-      const url = `books/${slug}/images/image-${n}${IMG_EXT}`;
+  const tokens = [];
+
+  for (const r of rows) {
+    if (/^\[IMG:(\d+)\]$/.test(r)) {
+      const n = parseInt(r.match(/^\[IMG:(\d+)\]$/)[1], 10);
+      const basePath = `books/${slug}/images/image-${n}`;
+
+      // קבע סיומת ראשית לפי אם זה הקאבר או לא
+      const primaryExt = (n === 1) ? 'jpg' : 'jpeg';
+      const fallbackExt = (primaryExt === 'jpg') ? 'jpeg' : 'jpg';
+
       const html = `
         <figure style="margin:0;display:flex;align-items:center;justify-content:center;height:100%;">
-          <img src="${url}" alt="image-${n}" loading="lazy" decoding="async"
-               style="max-width:100%;max-height:100%;border-radius:8px;display:block">
+          <img 
+            src="${basePath}.${primaryExt}"
+            alt="image-${n}" 
+            loading="lazy" 
+            decoding="async"
+            onerror="this.onerror=null; this.src='${basePath}.${fallbackExt}';"
+            style="max-width:100%;max-height:100%;border-radius:8px;display:block"
+          >
         </figure>`;
-      tokens.push({type:'image', html});
-    } else if (/^\*{6,}\s*$/.test(r)){
-      tokens.push({type:'hr'});
-    } else if (/^\s*$/.test(r)){
-      tokens.push({type:'blank'});
+
+      tokens.push({ type: 'image', html });
+    } else if (/^\*{6,}\s*$/.test(r)) {
+      tokens.push({ type: 'hr' });
+    } else if (/^\s*$/.test(r)) {
+      tokens.push({ type: 'blank' });
     } else {
-      tokens.push({type:'line', text:r});
+      tokens.push({ type: 'line', text: r });
     }
   }
   return tokens;
