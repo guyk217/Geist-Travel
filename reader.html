@@ -1,139 +1,147 @@
 <!doctype html>
-<html lang="en" dir="ltr">
+<html lang="he" dir="rtl">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reader</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Reader</title>
 
-<link rel="stylesheet" href="css/theme.css">
-<link rel="stylesheet" href="css/styles.css">
+  <!-- הקבצים הקיימים שלך (לא נוגעים בעיצוב הכללי) -->
+  <link rel="stylesheet" href="css/theme.css">
+  <link rel="stylesheet" href="css/styles.css">
 
-<style>
-  /* לא נוגעים בעיצוב הקיים – רק מה שצריך לעימוד עמודי */
-  :root{
-    --page-gap: 0;                 /* אין רווח בין עמודים */
-  }
-  body.bg-paper { overscroll-behavior: contain; }
+  <style>
+    /* ===== תוספות קלות בלבד לקריאה ===== */
 
-  .topbar{
-    display:flex; align-items:center; justify-content:space-between;
-    padding:14px 16px 6px;
-  }
-  .left-tools{ display:flex; align-items:center; gap:8px; }
+    body.bg-paper { overscroll-behavior: contain; }
 
-  .back-btn{
-    background:#332e2a; color:#fff; border:0; border-radius:18px;
-    padding:8px 14px; font-size:14px;
-    box-shadow:0 3px 10px rgba(0,0,0,.12);
-  }
-  .goto-btn{
-    background:#efe7db; color:#2f2a26; border:1px solid #decfb8; border-radius:16px;
-    padding:6px 10px; font-size:13px;
-    box-shadow:0 2px 8px rgba(0,0,0,.08);
-  }
-  .page-count{ font-weight:700; color:#332e2a; opacity:.85; }
+    .topbar{
+      display:flex; align-items:center; justify-content:space-between;
+      gap:8px; padding:14px 16px 6px;
+    }
+    .back-btn{
+      background:#332e2a; color:#fff; border:0; border-radius:18px;
+      padding:8px 14px; font-size:14px;
+      box-shadow:0 3px 10px rgba(0,0,0,.12);
+    }
+    .jump-btn{
+      background:#ede3d5; border:1px solid #d7c8b3; color:#2f2a26;
+      border-radius:18px; padding:8px 12px; font-size:14px;
+    }
+    .page-count{ font-weight:700; color:#332e2a; opacity:.9; }
 
-  #stage{
-    position:relative;
-    height: calc(100dvh - 110px);     /* אזור קריאה בגובה יציב */
-    overflow:hidden;
-    margin:8px auto 0;
-    max-width:820px;
-  }
+    /* הבמה של העימוד */
+    #stage{
+      position:relative; margin:8px auto 0; max-width:820px;
+      height: calc(100dvh - 118px); /* גובה עקבי */
+      overflow:hidden;
+    }
+    /* יש לנו רק עמוד אחד ב-DOM, אנחנו מחליפים תוכן */
+    .page{ height:100%; padding:10px; box-sizing:border-box; }
+    .page-card{
+      height:100%; width:100%; overflow:hidden;
+      background:#ffffffe6; border:1px solid var(--border);
+      border-radius:16px; backdrop-filter: blur(2px);
+      box-shadow:0 10px 24px var(--shadow);
+      display:flex;
+    }
+    .page-inner{
+      /* אנגלית = LTR ויישור שמאל */
+      direction:ltr; text-align:left;
+      font-family:"EB Garamond", Georgia, "Times New Roman", serif;
+      font-size:17px; line-height:1.7;
+      color:#2c2a27;
+      padding:20px 22px 24px 22px;  /* עוד ריווח מימין לפי בקשה קודמת */
+      overflow:hidden;              /* אין גלילה פנימית אחרי העימוד */
+      width:100%;
+    }
+    .page-inner p{ margin:0 0 .85em; }
+    .page-inner img{ width:100%; height:auto; border-radius:10px; display:block; }
 
-  /* קלף הקריאה – שומרים על הסטייל הקיים */
-  .page-card{
-    height:100%; width:100%;
-    background:#fff7; border:1px solid var(--border);
-    border-radius:18px;
-    backdrop-filter: blur(2px);
-    box-shadow:0 10px 24px var(--shadow);
-    display:flex;
-  }
-  /* אזור התוכן המודפס לעמודים */
-  .page-inner{
-    direction:ltr; text-align:left;
-    font-family:"EB Garamond", Georgia, "Times New Roman", serif;
-    font-size:18px; line-height:1.7; color:#2c2a27;
-    padding:22px 18px 26px 22px;    /* קצת פחות ריווח מימין */
-    width:100%;
-    overflow:hidden;
-  }
+    /* מפריד מכוכביות ****** */
+    hr.separator{
+      border:none; height:1px;
+      background:linear-gradient(90deg,transparent,#b7a98f,transparent);
+      margin:14px 0;
+    }
 
-  /* כאן הקסם: columns = עמודים */
-  #columns{
-    height:100%;
-    /* column-width נקבע דינמית לפי רוחב העמוד בפועל (JS) */
-    column-gap: var(--page-gap);
-    column-fill: auto;
-    /* Snap אופקי בין "עמודים" */
-    scroll-snap-type: x mandatory;
-  }
-  /* כל "עמוד" הוא טור בגובה מלא ורוחב העמוד */
-  .page-column{
-    break-inside: avoid;
-    display:block;
-    height:100%;
-    width:100%;
-    scroll-snap-align: start;
-  }
+    /* בלוק תמונה עם יחס ממדים יציב כך שהעימוד לא "בורח" לפני שהתמונה נטענת */
+    .img-block{
+      position:relative; width:100%;
+      aspect-ratio: 4/3;                 /* יחס דיפולטי יציב */
+      border-radius:10px; overflow:hidden;
+      border:1px solid var(--border); background:#f6efe4;
+      margin:10px 0 12px;
+    }
+    .img-block img{
+      position:absolute; inset:0; width:100%; height:100%; object-fit:cover;
+      filter: blur(6px);
+      transition: filter .25s ease;
+    }
+    .img-block.loaded img{ filter:none; }
 
-  /* תמונות – לא חותכות עמוד, נטענות לייזי, נשארות בגבולות העמוד */
-  #columns img{
-    max-width:100%; height:auto; display:block; margin:10px auto;
-    border-radius:8px;
-    break-inside: avoid; page-break-inside: avoid;
-  }
+    /* כפתור פתיחת איכות מלאה */
+    .img-open{
+      position:absolute; right:10px; bottom:10px;
+      border:0; border-radius:14px; padding:6px 8px;
+      background:rgba(50,45,40,.75); color:#fff; font-size:16px;
+    }
 
-  /* מפריד ****** כמו קודם */
-  hr.separator{
-    border:none; height:1px;
-    background:linear-gradient(90deg,transparent,#b7a98f,transparent);
-    margin:14px 0;
-    break-inside: avoid;
-  }
+    .meta-pills{ margin:0 0 8px; display:flex; gap:8px; flex-wrap:wrap; }
+    .pill{ background:var(--pill); border:1px solid #e7cfb2; color:#5a4428;
+           padding:4px 10px; border-radius:999px; font-size:.9rem; }
 
-  /* ניווט */
-  .nav{
-    position:fixed; left:0; right:0; bottom:18px;
-    display:flex; justify-content:space-between; align-items:center;
-    max-width:940px; margin:0 auto; padding:0 14px;
-  }
-  .nav button{
-    width:58px; height:58px; border-radius:16px; border:0;
-    background:#2f2a26; color:#fff; font-size:20px;
-    display:grid; place-items:center;
-    box-shadow:0 8px 22px rgba(0,0,0,.18);
-  }
-  .nav button[disabled]{ opacity:.35; pointer-events:none; }
-  .hint{ text-align:center; opacity:.65; font-size:14px; margin-top:6px; }
+    /* חיצים + טקסט עזרה */
+    .nav{
+      position:fixed; left:0; right:0; bottom:18px;
+      display:flex; justify-content:space-between; align-items:center;
+      max-width:940px; margin:0 auto; padding:0 14px;
+      pointer-events:none; /* שהכרטיס יישאר הקליד */
+    }
+    .nav button{
+      width:56px; height:56px; border-radius:16px; border:0;
+      background:#2f2a26; color:#fff; font-size:20px;
+      display:grid; place-items:center; box-shadow:0 8px 22px rgba(0,0,0,.18);
+      pointer-events:auto;
+    }
+    .nav button[disabled]{ opacity:.35; pointer-events:none; }
+    .hint{ text-align:center; opacity:.65; font-size:14px; margin-top:6px; pointer-events:none; }
 
-  /* טעינה */
-  #loadingOverlay{position:absolute; inset:0; display:none; place-items:center; z-index:3}
-  #loadingOverlay .bubble{background:#2f2a26;color:#fff;padding:.6rem 1.1rem;border-radius:999px;box-shadow:0 10px 28px rgba(0,0,0,.18);font-weight:700}
+    /* שכבת טעינה */
+    .loading{
+      position:absolute; inset:0; display:grid; place-items:center;
+      z-index:10; pointer-events:none;
+      background:
+        radial-gradient(ellipse at top, rgba(255,255,255,.50), transparent 60%),
+        repeating-linear-gradient(0deg, rgba(0,0,0,.015), rgba(0,0,0,.015) 2px, transparent 2px, transparent 36px),
+        var(--paper);
+      border-radius:16px;
+    }
+    .spinner{
+      background:#2f2a26; color:#fff; padding:10px 18px; border-radius:999px;
+      box-shadow:0 10px 24px rgba(0,0,0,.18);
+      font-weight:700;
+    }
 
-  @media (max-width:560px){
-    .nav button{ width:54px; height:54px; }
-    .page-inner{ font-size:17px; }
-  }
-</style>
+    @media (max-width:560px){
+      .page-inner{ font-size:16.2px; padding:18px 18px 22px; }
+      .nav button{ width:54px; height:54px; }
+    }
+  </style>
 </head>
 <body class="bg-paper">
   <div class="topbar">
-    <div class="left-tools">
-      <button class="back-btn" onclick="history.back()">חזרה</button>
-      <button class="goto-btn" id="gotoBtn" type="button">קפוץ…</button>
-    </div>
+    <button class="back-btn" id="back">חזרה</button>
+    <button class="jump-btn" id="jump">קפוץ…</button>
     <div class="page-count" id="counter">1/1</div>
   </div>
 
   <div id="stage">
-    <div class="page-card">
-      <div class="page-inner">
-        <div id="columns"></div>
+    <div class="page">
+      <div class="page-card">
+        <div class="loading" id="loader"><div class="spinner">טוען את הספר…</div></div>
+        <div class="page-inner" id="page"></div>
       </div>
     </div>
-    <div id="loadingOverlay"><div class="bubble">טוען את הספר…</div></div>
   </div>
 
   <div class="nav">
