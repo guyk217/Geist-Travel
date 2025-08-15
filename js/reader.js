@@ -173,15 +173,77 @@ function splitParagraphHTML(html){
 }
 
 function paginate(tokens){
-  // ≈16 שורות בעמוד על מסך טלפון; כוון 150–180 לפי הטעם שלך
-  const WORDS_PER_PAGE = 165;
-  const IMG_WEIGHT = 40; // תמונה שווה ~3–4 שורות
-  const SEP_WEIGHT = 10; // ****** שווה קצת "מילים"
-  const META_WEIGHT = 0;
+  // === כיוונון מהיר ===
+  const WORDS_PER_PAGE_TARGET = 160; // בערך ~16 שורות במסך טלפון
+  const MAX_LINES_PER_PAGE    = 16;
+  const IMG_WEIGHT            = 40;
+  const SEP_WEIGHT            = 10;
 
   const pages = [];
-  let curHTML = '';
-  let curWords = 0;
+
+  // מודד זהה לדף אמיתי
+  const stage = document.getElementById('stage');
+  const shell = document.createElement('div');
+  shell.style.visibility = 'hidden';
+  shell.style.position   = 'absolute';
+  shell.style.inset      = '0';
+  shell.style.pointerEvents = 'none';
+
+  const card  = document.createElement('div');
+  card.className = 'page-card';
+  card.style.height = '100%';
+  card.style.width  = '100%';
+
+  const inner = document.createElement('div');
+  inner.className = 'page-inner';
+  inner.style.overflow = 'hidden';
+
+  card.appendChild(inner);
+  shell.appendChild(card);
+  stage.appendChild(shell);
+
+  // --- line-height בפיקסלים (תיקון הבאג) ---
+  const cs    = getComputedStyle(inner);
+  const fsPx  = parseFloat(cs.fontSize) || 16;
+  const lhRaw = cs.lineHeight;             // יכול להיות "normal", "1.7" או "28px"
+  let lhPx;
+  if (lhRaw === 'normal') {
+    lhPx = 1.7 * fsPx;                     // ברירת מחדל נוחה לסגנון שלך
+  } else if (/px$/.test(lhRaw)) {
+    lhPx = parseFloat(lhRaw);
+  } else {
+    lhPx = parseFloat(lhRaw) * fsPx;       // ערך יחסי (ללא יחידות)
+  }
+
+  // בדיקת מספר שורות אמיתי
+  const fitsLines = (html) => {
+    inner.innerHTML = html;
+    const lines = Math.ceil(inner.scrollHeight / lhPx);
+    return lines <= MAX_LINES_PER_PAGE;
+  };
+
+  // ספירת מילים מהירה
+  const countWords = (txt) => {
+    const m = txt.trim().match(/\S+/g);
+    return m ? m.length : 0;
+  };
+
+  // HTML לבלוקים
+  const blockHTML = (tk) => {
+    if (tk.type === 'sep')  return '<hr class="separator">';
+    if (tk.type === 'meta') return tk.html;
+    if (tk.type === 'img')  return `
+      <figure class="img-block" data-src="${tk.src}">
+        <img alt="" decoding="async" loading="lazy" src="${tk.src}">
+        <button class="img-open" title="פתח באיכות מלאה">↔️</button>
+      </figure>`;
+    if (tk.type === 'p')    return tk.html;
+    return '';
+  };
+
+  // מצב עמוד נוכחי
+  let curHTML   = '';
+  let curWords  = 0;
 
   const flush = () => {
     pages.push(curHTML.trim() ? curHTML : '<p></p>');
@@ -189,71 +251,87 @@ function paginate(tokens){
     curWords = 0;
   };
 
-  // הוספת בלוק לא-פסקה עם "משקל" מילים
-  const addBlock = (html, weight) => {
-    if (curWords > 0 && curWords + weight > WORDS_PER_PAGE) flush();
-    curHTML += html;
-    curWords += weight;
-    if (curWords >= WORDS_PER_PAGE) flush();
-  };
+  const tryAppend = (html) => fitsLines(curHTML + html);
 
-  // חילוץ טקסט נקי מתוך <p>…</p>
-  const textOf = (pHtml) => {
-    const div = document.createElement('div');
-    div.innerHTML = pHtml;
-    return (div.textContent || '').replace(/\s+/g,' ').trim();
+  // פסקה ארוכה – מילים עד הגבלה
+  const appendParagraphByWords = (pHtml) => {
+    const raw = pHtml.replace(/^<p>/,'').replace(/<\/p>$/,'').replace(/\s+/g,' ').trim();
+    if (!raw.length){
+      const ph = '<p>&nbsp;</p>';
+      if (!tryAppend(ph)) flush();
+      curHTML += ph;
+      return;
+    }
+
+    const words = raw.split(' ');
+    let bufWords = [];
+
+    for (let i = 0; i < words.length; i++){
+      const w = words[i];
+
+      // אם עברנו את יעד המילים – שבור עמוד
+      if (curWords >= WORDS_PER_PAGE_TARGET){
+        if (bufWords.length){
+          const chunk = `<p>${bufWords.join(' ')}</p>`;
+          if (!tryAppend(chunk)) flush();
+          curHTML += chunk;
+          bufWords = [];
+        }
+        flush();
+      }
+
+      const next = (bufWords.length ? bufWords.join(' ') + ' ' : '') + w;
+      const nextHtml = `<p>${next}</p>`;
+
+      if (tryAppend(nextHtml)){
+        bufWords.push(w);
+        curWords += 1;
+      } else {
+        if (bufWords.length){
+          const chunk = `<p>${bufWords.join(' ')}</p>`;
+          if (!tryAppend(chunk)) flush();
+          curHTML += chunk;
+          bufWords = [];
+        } else {
+          flush(); // מילה "גדולה" שלא נכנסה – פותחים עמוד
+        }
+
+        const fresh = `<p>${w}</p>`;
+        // אחרי פתיחת עמוד חדש זה אמור להיכנס
+        curHTML += fresh;
+        curWords += 1;
+      }
+    }
+
+    if (bufWords.length){
+      const chunk = `<p>${bufWords.join(' ')}</p>`;
+      if (!tryAppend(chunk)) flush();
+      curHTML += chunk;
+    }
   };
 
   for (const tk of tokens){
     if (tk.type === 'p'){
-      let text = textOf(tk.html);
-      if (!text){
-        addBlock('<p>&nbsp;</p>', 1);
-        continue;
-      }
-
-      let words = text.split(' ');
-      // נחתוך את הפסקה למקטעים שלא עוברים את מכסת המילים של העמוד
-      while (words.length){
-        const capacity = WORDS_PER_PAGE - curWords;
-        if (capacity <= 0) { flush(); continue; }
-
-        const take = Math.min(capacity, words.length);
-        const chunk = words.splice(0, take);
-
-        curHTML += `<p>${chunk.join(' ')}</p>`;
-        curWords += chunk.length;
-
-        if (curWords >= WORDS_PER_PAGE && words.length){
-          flush();
-        }
-      }
+      appendParagraphByWords(tk.html);
       continue;
     }
 
-    if (tk.type === 'img'){
-      addBlock(
-        `<figure class="img-block" data-src="${tk.src}">
-           <img alt="" decoding="async" loading="lazy" src="${tk.src}">
-           <button class="img-open" title="פתח באיכות מלאה">↔️</button>
-         </figure>`,
-        IMG_WEIGHT
-      );
-      continue;
+    const html   = blockHTML(tk);
+    const weight = (tk.type === 'img') ? IMG_WEIGHT
+                 : (tk.type === 'sep') ? SEP_WEIGHT
+                 : 0;
+
+    if (curWords > 0 && curWords + weight > WORDS_PER_PAGE_TARGET){
+      flush();
     }
 
-    if (tk.type === 'sep'){
-      addBlock('<hr class="separator">', SEP_WEIGHT);
-      continue;
-    }
-
-    if (tk.type === 'meta'){
-      addBlock(tk.html, META_WEIGHT);
-      continue;
-    }
+    if (!tryAppend(html)) flush();
+    curHTML += html;
+    curWords += weight;
   }
 
   if (curHTML.trim()) flush();
+  shell.remove();
   return pages;
 }
 
