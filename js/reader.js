@@ -177,63 +177,70 @@ function paginate(tokens){
   const meas = makeMeasurer();
   const maxH = getMaxContentHeight();
 
-  let cur = '';      // HTML של העמוד הנוכחי
-  const flush = ()=>{
-    pages.push(cur || '<p></p>');
-    cur = '';
-  };
+  // line-height אמיתי בפיקסלים של גוף העמוד
+  const lh = parseFloat(getComputedStyle(meas).lineHeight) || 28;
+  const MAX_LINES = 16; // אפשר לשנות ל-17/18 אם תרצה
+
+  let cur = '';
+  const flush = ()=>{ pages.push(cur || '<p></p>'); cur=''; };
 
   const fits = (candidate)=>{
     meas.innerHTML = candidate;
-    return meas.scrollHeight <= maxH;
+    const h = meas.scrollHeight;
+    const lines = Math.floor(h / lh + 0.01);
+    return (h <= maxH) && (lines <= MAX_LINES);
+  };
+
+  // מפצל פסקה ארוכה לפי כמות תווים מקסימלית שמתאימה לעמוד
+  const appendParagraphByLines = (pHtml)=>{
+    const tmp = document.createElement('div');
+    tmp.innerHTML = pHtml;
+    const text = tmp.textContent || '';
+
+    let start = 0;
+    while (start < text.length){
+      // כל השאר נכנס? הוסף וסיים
+      let candidate = cur + '<p>' + escapeHTML(text.slice(start)) + '</p>';
+      if (fits(candidate)){ cur = candidate; break; }
+
+      // אפילו תו אחד לא נכנס בעמוד הנוכחי? שבור עמוד
+      candidate = cur + '<p>' + escapeHTML(text.slice(start, start+1)) + '</p>';
+      if (!fits(candidate)){ flush(); continue; }
+
+      // חיפוש בינארי – כמה תווים מקסימום נכנסים בעמוד הנוכחי
+      let low = 1, high = text.length - start;
+      while (low < high){
+        const mid = Math.ceil((low + high) / 2);
+        candidate = cur + '<p>' + escapeHTML(text.slice(start, start+mid)) + '</p>';
+        if (fits(candidate)) low = mid; else high = mid - 1;
+      }
+
+      // הוסף את הקטע שנכנס
+      cur = cur + '<p>' + escapeHTML(text.slice(start, start+low)) + '</p>';
+      start += low;
+
+      // עוד נשאר טקסט? שבור לעמוד הבא
+      if (start < text.length) flush();
+    }
   };
 
   for (const tk of tokens){
-    const html = tokenHTML(tk);
-
-    // בלוקים שאינם פסקאות – מנסים להכניס שלמים
-    if (tk.type !== 'p'){
-      const tryHtml = cur + html;
-      if (fits(tryHtml)){
-        cur = tryHtml;
-      }else{
-        flush();
-        // אם לא נכנס בעמוד ריק (נדיר), נכריח בדף נפרד
-        if (!fits(html)) {
-          // במקרים חריגים (כמעט לא קורה) – נכפה גובה קטן יותר:
-          meas.style.paddingBottom = '20px';
-        }
-        cur = html;
-      }
+    if (tk.type === 'p'){
+      appendParagraphByLines(tk.html);
       continue;
     }
 
-// פסקה – נפרק לשורות במקום למילים
-const lines = html
-  .replace(/^<p>/, '').replace(/<\/p>$/, '')
-  .split(/\n/); // שבר לפי שורות
-
-let buf = '<p>';
-let lineCount = 0;
-for (const line of lines) {
-  buf += escapeHTML(line) + '\n';
-  lineCount++;
-
-  const tryHtml = cur + buf + '</p>';
-  const fitsHeight = fits(tryHtml);
-  const fitsLines  = lineCount <= 16; // עד 16 שורות לעמוד
-
-  if (!fitsHeight || !fitsLines) {
-    cur += buf + '</p>';
-    flush(); // סיום עמוד
-    buf = '<p>';
-    lineCount = 0;
+    // תמונה/קו מפריד/מטא – כבלוק אחד
+    const html = tokenHTML(tk);
+    if (fits(cur + html)) {
+      cur += html;
+    } else {
+      flush();
+      cur = html; // אם גבוה מדי, ודא שיש max-height לתמונה ב-CSS
+    }
   }
-}
-cur += buf + '</p>';
-  }
+
   if (cur) flush();
-
   meas.remove();
   return pages;
 }
