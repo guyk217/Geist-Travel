@@ -208,26 +208,29 @@ function paginate(tokens){
       continue;
     }
 
-    // פסקה – נפרק למקטעים קטנים
-    const chunks = splitParagraphHTML(html);
-    let buf = '<p>';
-    for (const part of chunks){
-      const tryHtml = cur + buf + part + '</p>';
-      if (fits(tryHtml)){
-        buf += part;
-      }else{
-        // אם אין שום תוכן בבאפר – נשבור את העמוד קודם
-        if (buf === '<p>'){
-          flush();
-          buf = '<p>' + part;
-        }else{
-          cur += buf + '</p>';
-          flush();
-          buf = '<p>' + part;
-        }
-      }
-    }
+// פסקה – נפרק לשורות במקום למילים
+const lines = html
+  .replace(/^<p>/, '').replace(/<\/p>$/, '')
+  .split(/\n/); // שבר לפי שורות
+
+let buf = '<p>';
+let lineCount = 0;
+for (const line of lines) {
+  buf += escapeHTML(line) + '\n';
+  lineCount++;
+
+  const tryHtml = cur + buf + '</p>';
+  const fitsHeight = fits(tryHtml);
+  const fitsLines  = lineCount <= 16; // עד 16 שורות לעמוד
+
+  if (!fitsHeight || !fitsLines) {
     cur += buf + '</p>';
+    flush(); // סיום עמוד
+    buf = '<p>';
+    lineCount = 0;
+  }
+}
+cur += buf + '</p>';
   }
   if (cur) flush();
 
