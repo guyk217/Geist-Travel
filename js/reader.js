@@ -64,7 +64,7 @@ async function textToTokens(raw, imgDir){
   const pushP = (txt) => {
     const t = txt.trim();
     if (!t) return;
-    tokens.push({type:'p', html:`<p>${escapeHTML(t)}</p>`});
+    tokens.push({type:'p', text: t});
   };
 
   let buf = '';
@@ -79,7 +79,7 @@ async function textToTokens(raw, imgDir){
         tokens.push({type:'img', src: ref.src});
       }else{
         tokens.push({type:'sep'});
-        tokens.push({type:'p', html:`<p><em>Missing image ${m[1]}</em></p>`});
+        tokens.push({type:'p', text:`Missing image ${m[1]}`});
         tokens.push({type:'sep'});
       }
       continue;
@@ -106,110 +106,105 @@ async function textToTokens(raw, imgDir){
   // הזרקת Place/Date לראש הדפים
   if (date || place){
     const pills=[];
-    if (date)  pills.push(`<span class="pill">Date: ${escapeHTML(date)}</span>`);
-    if (place) pills.push(`<span class="pill">Place: ${escapeHTML(place)}</span>`);
-    tokens.unshift({type:'meta', html:`<div class="meta-pills">${pills.join(' ')}</div>`});
+    if (date)  pills.push(`Date: ${escapeHTML(date)}`);
+    if (place) pills.push(`Place: ${escapeHTML(place)}`);
+    tokens.unshift({type:'meta', html: pills.join(' | ')});
   }
 
   return tokens;
 }
 
-// ---------- עימוד פשוט לפי מילים ----------
+// ---------- עימוד לפי שורות (16 שורות לעמוד) ----------
+function makeMeasurer(){
+  const meas = document.createElement('div');
+  meas.className = 'page-inner';
+  meas.style.position = 'absolute';
+  meas.style.visibility = 'hidden';
+  meas.style.pointerEvents = 'none';
+  meas.style.top = '0';
+  meas.style.left = '0';
+  meas.style.width = $('#page').offsetWidth + 'px';
+  document.body.appendChild(meas);
+  return meas;
+}
+
 function paginate(tokens){
-  // הגדרות עימוד
-  const WORDS_PER_PAGE = 160;  // כמה מילים בעמוד
-  const IMG_WEIGHT = 40;       // "עלות" תמונה במילים
-  const SEP_WEIGHT = 10;       // "עלות" מפריד במילים
-
+  const LINES_PER_PAGE = 16;
+  const measurer = makeMeasurer();
   const pages = [];
-  let curHTML = '';
-  let curWords = 0;
+  let currentPage = '';
+  let currentLines = 0;
 
-  const flush = () => {
-    pages.push(curHTML.trim() || '<p>&nbsp;</p>');
-    curHTML = '';
-    curWords = 0;
+  const getLineCount = (text) => {
+    measurer.innerHTML = `<p>${escapeHTML(text)}</p>`;
+    const singleLineHeight = parseFloat(getComputedStyle(measurer).lineHeight);
+    const actualHeight = measurer.scrollHeight;
+    return Math.ceil(actualHeight / singleLineHeight);
   };
 
-  // עוזר: הוספת פסקה מטקסט
-  const addParagraph = (txt) => {
-    curHTML += `<p>${txt}</p>`;
-  };
-
-  for (const tk of tokens) {
-    if (tk.type === 'p') {
-      // הוצאת הטקסט מתוך תגיות <p>
-      const raw = tk.html
-        .replace(/^<p>/, '')
-        .replace(/<\/p>$/, '')
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      if (!raw) {
-        // פסקה ריקה
-        if (curWords >= WORDS_PER_PAGE) flush();
-        addParagraph('&nbsp;');
-        continue;
-      }
-
-      // פיצול לפי מילים
-      const words = raw.split(' ');
-      let buf = '';
-
-      for (let i = 0; i < words.length; i++) {
-        const word = words[i];
-
-        // אם עברנו את המגבלה - סיים עמוד
-        if (curWords >= WORDS_PER_PAGE) {
-          if (buf) { 
-            addParagraph(buf); 
-            buf = ''; 
-          }
-          flush();
-        }
-
-        buf = buf ? buf + ' ' + word : word;
-        curWords += 1;
-      }
-
-      // סיים את הפסקה
-      if (buf) addParagraph(buf);
-      continue;
+  const addToPage = (html, lineCount) => {
+    if (currentLines + lineCount > LINES_PER_PAGE && currentPage) {
+      pages.push(currentPage);
+      currentPage = html;
+      currentLines = lineCount;
+    } else {
+      currentPage += html;
+      currentLines += lineCount;
     }
+  };
 
-    // בלוקים אחרים (תמונות, מפרידים, מטא)
-    let html = '';
-    let weight = 0;
-
-    if (tk.type === 'img') {
-      html = `
-        <figure class="img-block" data-src="${tk.src}">
-          <img alt="" decoding="async" loading="lazy" src="${tk.src}">
+  for (const token of tokens) {
+    if (token.type === 'p') {
+      const text = token.text;
+      const words = text.split(' ');
+      let currentParagraph = '';
+      
+      for (const word of words) {
+        const testText = currentParagraph ? currentParagraph + ' ' + word : word;
+        const lineCount = getLineCount(testText);
+        
+        if (lineCount <= LINES_PER_PAGE - currentLines || !currentParagraph) {
+          currentParagraph = testText;
+        } else {
+          // Add current paragraph and start new one
+          if (currentParagraph) {
+            const html = `<p>${escapeHTML(currentParagraph)}</p>`;
+            const lines = getLineCount(currentParagraph);
+            addToPage(html, lines);
+          }
+          currentParagraph = word;
+        }
+      }
+      
+      if (currentParagraph) {
+        const html = `<p>${escapeHTML(currentParagraph)}</p>`;
+        const lines = getLineCount(currentParagraph);
+        addToPage(html, lines);
+      }
+      
+    } else if (token.type === 'img') {
+      const html = `
+        <figure class="img-block" data-src="${token.src}">
+          <img alt="" decoding="async" loading="lazy" src="${token.src}">
           <button class="img-open" title="פתח באיכות מלאה">↔️</button>
         </figure>`;
-      weight = IMG_WEIGHT;
-    } else if (tk.type === 'sep') {
-      html = '<hr class="separator">';
-      weight = SEP_WEIGHT;
-    } else if (tk.type === 'meta') {
-      html = tk.html;
-      weight = 0;
-    } else {
-      html = tk.html || '';
+      addToPage(html, 4); // Images take ~4 lines
+      
+    } else if (token.type === 'sep') {
+      addToPage('<hr class="separator">', 1);
+      
+    } else if (token.type === 'meta') {
+      const html = `<div class="meta-pills"><span class="pill">${token.html}</span></div>`;
+      addToPage(html, 1);
     }
-
-    // אם הבלוק יעבור את המגבלה - התחל עמוד חדש
-    if (curWords > 0 && curWords + weight > WORDS_PER_PAGE) {
-      flush();
-    }
-
-    curHTML += html;
-    curWords += weight;
   }
 
-  // סיים את העמוד האחרון
-  if (curHTML.trim()) flush();
-  return pages;
+  if (currentPage) {
+    pages.push(currentPage);
+  }
+
+  measurer.remove();
+  return pages.length > 0 ? pages : ['<p>No content found</p>'];
 }
 
 // ---------- מציג עמוד + Lazy Images + שכנים ----------
@@ -240,10 +235,13 @@ function mountHTML(html){
     }
 
     // פתיחה באיכות מלאה
-    block.querySelector('.img-open').addEventListener('click', (e)=>{
-      e.stopPropagation();
-      window.open(full, '_blank');
-    });
+    const openBtn = block.querySelector('.img-open');
+    if (openBtn) {
+      openBtn.addEventListener('click', (e)=>{
+        e.stopPropagation();
+        window.open(full, '_blank');
+      });
+    }
   });
 }
 
