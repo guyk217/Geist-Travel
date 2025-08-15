@@ -172,75 +172,99 @@ function splitParagraphHTML(html){
   return parts.map(p => escapeHTML(p)).map(p => p ? `<span>${p}</span>` : p);
 }
 
+// === פגינציה פשוטה ומהירה: לפי כמות מילים ===
 function paginate(tokens){
-  // === כיוונון מהיר ===
-  const WORDS_PER_PAGE_TARGET = 160; // בערך ~16 שורות במסך טלפון
-  const MAX_LINES_PER_PAGE    = 16;
-  const IMG_WEIGHT            = 40;
-  const SEP_WEIGHT            = 10;
+  // כוונון מהיר: כמה מילים בעמוד? (160 ≈ ~16 שורות במסך טלפון)
+  const WORDS_PER_PAGE = 160;
+  const IMG_WEIGHT = 40;  // "עלות" תמונה במילים
+  const SEP_WEIGHT = 10;  // "עלות" מפריד ****** במילים
 
   const pages = [];
+  let curHTML  = '';
+  let curWords = 0;
 
-  // מודד זהה לדף אמיתי
-  const stage = document.getElementById('stage');
-  const shell = document.createElement('div');
-  shell.style.visibility = 'hidden';
-  shell.style.position   = 'absolute';
-  shell.style.inset      = '0';
-  shell.style.pointerEvents = 'none';
+  const flush = () => {
+    pages.push(curHTML.trim() ? curHTML : '<p></p>');
+    curHTML = '';
+    curWords = 0;
+  };
 
-  const card  = document.createElement('div');
-  card.className = 'page-card';
-  card.style.height = '100%';
-  card.style.width  = '100%';
+  // עוזר קטן: הוספת פסקה מטקסט גולמי (ללא <p> מסביב)
+  const addParagraph = (txt) => {
+    curHTML += `<p>${txt}</p>`;
+  };
 
-  const inner = document.createElement('div');
-  inner.className = 'page-inner';
-  inner.style.overflow = 'hidden';
+  for (const tk of tokens) {
+    if (tk.type === 'p') {
+      // נורמליזציה של הפסקה לטקסט (בלי תגיות)
+      const raw = tk.html
+        .replace(/^<p>/, '')
+        .replace(/<\/p>$/, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 
-  card.appendChild(inner);
-  shell.appendChild(card);
-  stage.appendChild(shell);
+      // פסקה ריקה
+      if (!raw) {
+        if (curWords >= WORDS_PER_PAGE) flush();
+        addParagraph('&nbsp;');
+        continue;
+      }
 
-  // --- line-height בפיקסלים (תיקון הבאג) ---
-  const cs    = getComputedStyle(inner);
-  const fsPx  = parseFloat(cs.fontSize) || 16;
-  const lhRaw = cs.lineHeight;             // יכול להיות "normal", "1.7" או "28px"
-  let lhPx;
-  if (lhRaw === 'normal') {
-    lhPx = 1.7 * fsPx;                     // ברירת מחדל נוחה לסגנון שלך
-  } else if (/px$/.test(lhRaw)) {
-    lhPx = parseFloat(lhRaw);
-  } else {
-    lhPx = parseFloat(lhRaw) * fsPx;       // ערך יחסי (ללא יחידות)
+      // שברים לפי מילים – בלי מדידות DOM
+      const words = raw.split(' ');
+      let buf = ''; // אוגר המילים לפסקה הנוכחית
+
+      for (let i = 0; i < words.length; i++) {
+        const w = words[i];
+
+        // אם עברנו את היעד – סגור מה שיש ופתח עמוד חדש
+        if (curWords >= WORDS_PER_PAGE) {
+          if (buf) { addParagraph(buf); buf = ''; }
+          flush();
+        }
+
+        if (buf) buf += ' ' + w; else buf = w;
+        curWords += 1;
+      }
+
+      // סוף הפסקה – כתוב את מה שנשאר
+      if (buf) addParagraph(buf);
+      continue;
+    }
+
+    // בלוקים שאינם פסקאות (תמונה / מפריד / מטא)
+    let html = '';
+    let weight = 0;
+
+    if (tk.type === 'img') {
+      html = `
+        <figure class="img-block" data-src="${tk.src}">
+          <img alt="" decoding="async" loading="lazy" src="${tk.src}">
+          <button class="img-open" title="פתח באיכות מלאה">↔️</button>
+        </figure>`;
+      weight = IMG_WEIGHT;
+    } else if (tk.type === 'sep') {
+      html = '<hr class="separator">';
+      weight = SEP_WEIGHT;
+    } else if (tk.type === 'meta') {
+      html = tk.html;
+      weight = 0;
+    } else {
+      html = tk.html || '';
+    }
+
+    // אם הבלוק "שובר" את היעד – שבור עמוד לפניו (אם יש כבר תוכן)
+    if (curWords > 0 && curWords + weight > WORDS_PER_PAGE) {
+      flush();
+    }
+
+    curHTML += html;
+    curWords += weight;
   }
 
-  // בדיקת מספר שורות אמיתי
-  const fitsLines = (html) => {
-    inner.innerHTML = html;
-    const lines = Math.ceil(inner.scrollHeight / lhPx);
-    return lines <= MAX_LINES_PER_PAGE;
-  };
-
-  // ספירת מילים מהירה
-  const countWords = (txt) => {
-    const m = txt.trim().match(/\S+/g);
-    return m ? m.length : 0;
-  };
-
-  // HTML לבלוקים
-  const blockHTML = (tk) => {
-    if (tk.type === 'sep')  return '<hr class="separator">';
-    if (tk.type === 'meta') return tk.html;
-    if (tk.type === 'img')  return `
-      <figure class="img-block" data-src="${tk.src}">
-        <img alt="" decoding="async" loading="lazy" src="${tk.src}">
-        <button class="img-open" title="פתח באיכות מלאה">↔️</button>
-      </figure>`;
-    if (tk.type === 'p')    return tk.html;
-    return '';
-  };
-
+  if (curHTML.trim()) flush();
+  return pages;
+}
   // מצב עמוד נוכחי
   let curHTML   = '';
   let curWords  = 0;
