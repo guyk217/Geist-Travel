@@ -41,12 +41,6 @@ async function probeImage(baseUrl){
 const escapeHTML = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 // ---------- המרה לטוקנים ----------
-/*
-  הופך את הטקסט ל"טוקנים" (יחידות עימוד):
-  - פסקאות
-  - מפריד ****** => <hr>
-  - תמונות => בלוק עם יחס ממדים יציב (נטען תמונה עצלה כשמופיעה)
-*/
 async function textToTokens(raw, imgDir){
   // Place/Date בתחילת הספר (לא חובה)
   let place=null, date=null;
@@ -120,119 +114,70 @@ async function textToTokens(raw, imgDir){
   return tokens;
 }
 
-// ---------- עימוד חזותי ----------
-/*
-  נעשה מדידה אמיתית בתוך page-inner "מדידה" נסתר.
-  מוסיפים טוקן-טוקן עד שהוא לא נכנס → חותכים לפסקאות לפי מילים.
-  בלוקי תמונה הם קבועי גובה (aspect-ratio) ולכן לא שוברים את העימוד.
-*/
-function makeMeasurer(){
-  const meas = document.createElement('div');
-  meas.className = 'page-inner';
-  meas.style.position = 'absolute';
-  meas.style.visibility = 'hidden';
-  meas.style.pointerEvents = 'none';
-  meas.style.inset = '0';
-  $('#stage').appendChild(meas);
-  return meas;
-}
-
-function getMaxContentHeight(){
-  // גובה פנימי אמיתי של ה-page-inner
-  const stage = $('#stage');
-  const style = getComputedStyle(stage);
-  const avail = stage.clientHeight
-    - parseFloat(style.paddingTop||0)
-    - parseFloat(style.paddingBottom||0)
-    - 0;
-  // הפחתה קלה לריווח בטוח
-  return Math.max(200, avail - 6);
-}
-
-function tokenHTML(tk){
-  if (tk.type === 'p')   return tk.html;
-  if (tk.type === 'meta')return tk.html;
-  if (tk.type === 'sep') return '<hr class="separator">';
-  if (tk.type === 'img'){
-    // בלוק עם יחס יציב; נטען תמונה אמיתית רק כשהעמוד מוצג
-    return `
-      <figure class="img-block" data-src="${tk.src}">
-        <img alt="" decoding="async" loading="lazy" src="${tk.src}">
-        <button class="img-open" title="פתח באיכות מלאה">↔️</button>
-      </figure>`;
-  }
-  return '';
-}
-
-function splitParagraphHTML(html){
-  // מפצל פסקה ל"חלקי מילים" כדי למלא עמוד יפה.
-  // קלט כמו "<p>some text…</p>" → מוציא רק הטקסט הפנימי
-  const text = html.replace(/^<p>/,'').replace(/<\/p>$/,'');
-  const parts = text.split(/(\s+)/); // שומר רווחים
-  return parts.map(p => escapeHTML(p)).map(p => p ? `<span>${p}</span>` : p);
-}
-
-// === פגינציה פשוטה ומהירה: לפי כמות מילים ===
+// ---------- עימוד פשוט לפי מילים ----------
 function paginate(tokens){
-  // כוונון מהיר: כמה מילים בעמוד? (160 ≈ ~16 שורות במסך טלפון)
-  const WORDS_PER_PAGE = 160;
-  const IMG_WEIGHT = 40;  // "עלות" תמונה במילים
-  const SEP_WEIGHT = 10;  // "עלות" מפריד ****** במילים
+  // הגדרות עימוד
+  const WORDS_PER_PAGE = 160;  // כמה מילים בעמוד
+  const IMG_WEIGHT = 40;       // "עלות" תמונה במילים
+  const SEP_WEIGHT = 10;       // "עלות" מפריד במילים
 
   const pages = [];
-  let curHTML  = '';
+  let curHTML = '';
   let curWords = 0;
 
   const flush = () => {
-    pages.push(curHTML.trim() ? curHTML : '<p></p>');
+    pages.push(curHTML.trim() || '<p>&nbsp;</p>');
     curHTML = '';
     curWords = 0;
   };
 
-  // עוזר קטן: הוספת פסקה מטקסט גולמי (ללא <p> מסביב)
+  // עוזר: הוספת פסקה מטקסט
   const addParagraph = (txt) => {
     curHTML += `<p>${txt}</p>`;
   };
 
   for (const tk of tokens) {
     if (tk.type === 'p') {
-      // נורמליזציה של הפסקה לטקסט (בלי תגיות)
+      // הוצאת הטקסט מתוך תגיות <p>
       const raw = tk.html
         .replace(/^<p>/, '')
         .replace(/<\/p>$/, '')
         .replace(/\s+/g, ' ')
         .trim();
 
-      // פסקה ריקה
       if (!raw) {
+        // פסקה ריקה
         if (curWords >= WORDS_PER_PAGE) flush();
         addParagraph('&nbsp;');
         continue;
       }
 
-      // שברים לפי מילים – בלי מדידות DOM
+      // פיצול לפי מילים
       const words = raw.split(' ');
-      let buf = ''; // אוגר המילים לפסקה הנוכחית
+      let buf = '';
 
       for (let i = 0; i < words.length; i++) {
-        const w = words[i];
+        const word = words[i];
 
-        // אם עברנו את היעד – סגור מה שיש ופתח עמוד חדש
+        // אם עברנו את המגבלה - סיים עמוד
         if (curWords >= WORDS_PER_PAGE) {
-          if (buf) { addParagraph(buf); buf = ''; }
+          if (buf) { 
+            addParagraph(buf); 
+            buf = ''; 
+          }
           flush();
         }
 
-        if (buf) buf += ' ' + w; else buf = w;
+        buf = buf ? buf + ' ' + word : word;
         curWords += 1;
       }
 
-      // סוף הפסקה – כתוב את מה שנשאר
+      // סיים את הפסקה
       if (buf) addParagraph(buf);
       continue;
     }
 
-    // בלוקים שאינם פסקאות (תמונה / מפריד / מטא)
+    // בלוקים אחרים (תמונות, מפרידים, מטא)
     let html = '';
     let weight = 0;
 
@@ -253,7 +198,7 @@ function paginate(tokens){
       html = tk.html || '';
     }
 
-    // אם הבלוק "שובר" את היעד – שבור עמוד לפניו (אם יש כבר תוכן)
+    // אם הבלוק יעבור את המגבלה - התחל עמוד חדש
     if (curWords > 0 && curWords + weight > WORDS_PER_PAGE) {
       flush();
     }
@@ -262,213 +207,8 @@ function paginate(tokens){
     curWords += weight;
   }
 
+  // סיים את העמוד האחרון
   if (curHTML.trim()) flush();
-  return pages;
-}
-  // מצב עמוד נוכחי
-  let curHTML   = '';
-  let curWords  = 0;
-
-  const flush = () => {
-    pages.push(curHTML.trim() ? curHTML : '<p></p>');
-    curHTML  = '';
-    curWords = 0;
-  };
-
-  const tryAppend = (html) => fitsLines(curHTML + html);
-
-  // פסקה ארוכה – מילים עד הגבלה
-  const appendParagraphByWords = (pHtml) => {
-    const raw = pHtml.replace(/^<p>/,'').replace(/<\/p>$/,'').replace(/\s+/g,' ').trim();
-    if (!raw.length){
-      const ph = '<p>&nbsp;</p>';
-      if (!tryAppend(ph)) flush();
-      curHTML += ph;
-      return;
-    }
-
-    const words = raw.split(' ');
-    let bufWords = [];
-
-    for (let i = 0; i < words.length; i++){
-      const w = words[i];
-
-      // אם עברנו את יעד המילים – שבור עמוד
-      if (curWords >= WORDS_PER_PAGE_TARGET){
-        if (bufWords.length){
-          const chunk = `<p>${bufWords.join(' ')}</p>`;
-          if (!tryAppend(chunk)) flush();
-          curHTML += chunk;
-          bufWords = [];
-        }
-        flush();
-      }
-
-      const next = (bufWords.length ? bufWords.join(' ') + ' ' : '') + w;
-      const nextHtml = `<p>${next}</p>`;
-
-      if (tryAppend(nextHtml)){
-        bufWords.push(w);
-        curWords += 1;
-      } else {
-        if (bufWords.length){
-          const chunk = `<p>${bufWords.join(' ')}</p>`;
-          if (!tryAppend(chunk)) flush();
-          curHTML += chunk;
-          bufWords = [];
-        } else {
-          flush(); // מילה "גדולה" שלא נכנסה – פותחים עמוד
-        }
-
-        const fresh = `<p>${w}</p>`;
-        // אחרי פתיחת עמוד חדש זה אמור להיכנס
-        curHTML += fresh;
-        curWords += 1;
-      }
-    }
-
-    if (bufWords.length){
-      const chunk = `<p>${bufWords.join(' ')}</p>`;
-      if (!tryAppend(chunk)) flush();
-      curHTML += chunk;
-    }
-  };
-
-  for (const tk of tokens){
-    if (tk.type === 'p'){
-      appendParagraphByWords(tk.html);
-      continue;
-    }
-
-    const html   = blockHTML(tk);
-    const weight = (tk.type === 'img') ? IMG_WEIGHT
-                 : (tk.type === 'sep') ? SEP_WEIGHT
-                 : 0;
-
-    if (curWords > 0 && curWords + weight > WORDS_PER_PAGE_TARGET){
-      flush();
-    }
-
-    if (!tryAppend(html)) flush();
-    curHTML += html;
-    curWords += weight;
-  }
-
-  if (curHTML.trim()) flush();
-  shell.remove();
-  return pages;
-}
-
-  // מצב עמוד נוכחי
-  let curHTML   = '';
-  let curWords  = 0;
-
-  const flush = () => {
-    pages.push(curHTML.trim() ? curHTML : '<p></p>');
-    curHTML  = '';
-    curWords = 0;
-  };
-
-  // נסה לצרף html לעמוד הנוכחי – תוך בדיקת שורות/גובה
-  const tryAppend = (html) => {
-    const candidate = curHTML + html;
-    return fitsHeight(candidate) && fitsLines(candidate);
-  };
-
-  // פסקה ארוכה – נוסיף מילה-מילה עד שנחצה יעד/שורות/גובה
-  const appendParagraphByWords = (pHtml) => {
-    const raw = pHtml.replace(/^<p>/,'').replace(/<\/p>$/,'').replace(/\s+/g,' ').trim();
-    if (!raw.length){
-      // פסקה ריקה
-      if (!tryAppend('<p>&nbsp;</p>')) flush();
-      curHTML += '<p>&nbsp;</p>';
-      return;
-    }
-
-    const words = raw.split(' ');
-    let buf = [];
-
-    for (let i = 0; i < words.length; i++){
-      const w = words[i];
-
-      // האם חצינו יעד מילים? אם כן—נשבור לפני שמוסיפים עוד
-      if (curWords >= WORDS_PER_PAGE_TARGET){
-        // יש משהו בבאפר? נסגור אותו לדף ונפלוש
-        if (buf.length){
-          const chunk = `<p>${buf.join(' ')}</p>`;
-          if (!tryAppend(chunk)) flush(); // ביטחון
-          curHTML += chunk;
-          buf = [];
-        }
-        flush();
-      }
-
-      // ננסה להוסיף את המילה לפסקה הנוכחית
-      const nextBuf = buf.length ? (buf.join(' ') + ' ' + w) : w;
-      const nextHtml = `<p>${nextBuf}</p>`;
-
-      if (tryAppend(nextHtml)){
-        buf.push(w);
-        curWords += 1;
-      } else {
-        // המילה לא נכנסת – קודם נסגור את מה שכן נכנס
-        if (buf.length){
-          const chunk = `<p>${buf.join(' ')}</p>`;
-          if (!tryAppend(chunk)) flush();
-          curHTML += chunk;
-          buf = [];
-        } else {
-          // קצה קיצון: גם מילה בודדת לא נכנסת בעמוד הנוכחי → שבור עמוד
-          flush();
-        }
-
-        // נסה שוב בעמוד חדש
-        const freshHtml = `<p>${w}</p>`;
-        if (!tryAppend(freshHtml)) {
-          // במקרה קיצון נוסף (גובה/שורות קשיחים מאוד) – נכפה
-          curHTML += freshHtml;
-        } else {
-          curHTML += freshHtml;
-        }
-        curWords += 1;
-      }
-    }
-
-    // סגור שאריות פסקה לעמוד הנוכחי
-    if (buf.length){
-      const chunk = `<p>${buf.join(' ')}</p>`;
-      if (!tryAppend(chunk)) flush();
-      curHTML += chunk;
-    }
-  };
-
-  for (const tk of tokens){
-    if (tk.type === 'p'){
-      appendParagraphByWords(tk.html);
-      continue;
-    }
-
-    // בלוקים אחרים – משקל מילים כדי לא לדחוס טקסט מעליהם
-    const html = blockHTML(tk);
-    const weight = (tk.type === 'img') ? IMG_WEIGHT
-                 : (tk.type === 'sep') ? SEP_WEIGHT
-                 : 0;
-
-    // אם ה"משקל" יפוצץ את היעד—שבור עמוד קודם (רק אם יש כבר תוכן)
-    if (curWords > 0 && curWords + weight > WORDS_PER_PAGE_TARGET){
-      flush();
-    }
-
-    if (!tryAppend(html)) {
-      flush();
-    }
-    curHTML += html;
-    curWords += weight;
-  }
-
-  if (curHTML.trim()) flush();
-
-  shell.remove(); // ניקוי המודד
   return pages;
 }
 
@@ -487,8 +227,7 @@ function mountHTML(html){
   const host = $('#page');
   host.innerHTML = html;
 
-  // Lazy image: כבר יש לנו <img> עם src; אנחנו פשוט מסירים blur כשנטען,
-  // ומשאירים רק בעמוד מוצג. ביציאה מהעמוד ננקה כדי לשמור על זיכרון.
+  // Lazy image: כבר יש לנו <img> עם src; אנחנו פשוט מסירים blur כשנטען
   host.querySelectorAll('.img-block').forEach(block=>{
     const img = block.querySelector('img');
     const full = block.getAttribute('data-src') || img.currentSrc || img.src;
