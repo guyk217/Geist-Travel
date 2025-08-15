@@ -173,75 +173,183 @@ function splitParagraphHTML(html){
 }
 
 function paginate(tokens){
+  // === פרמטרים לכיוונון מהיר ===
+  const WORDS_PER_PAGE_TARGET = 165; // ~16 שורות במסך טלפון; כוון 150–180 לפי הטעם
+  const MAX_LINES_PER_PAGE    = 16;  // מגבלת שורות חזותית אמיתית
+  const IMG_WEIGHT            = 40;  // "עלות" תמונה במילים (כדי שלא נדחוף טקסט מעליה)
+  const SEP_WEIGHT            = 10;  // "עלות" מפריד ****** במילים
+
   const pages = [];
-  const meas = makeMeasurer();
-  const maxH = getMaxContentHeight();
 
-  // line-height אמיתי בפיקסלים של גוף העמוד
-  const lh = parseFloat(getComputedStyle(meas).lineHeight) || 28;
-  const MAX_LINES = 16; // אפשר לשנות ל-17/18 אם תרצה
+  // --- מודד אמיתי זהה לדף ---
+  const stage = document.getElementById('stage');
+  const shell = document.createElement('div');
+  shell.style.visibility = 'hidden';
+  shell.style.position   = 'absolute';
+  shell.style.inset      = '0';
+  shell.style.pointerEvents = 'none';
+  shell.style.zIndex = '-1';
 
-  let cur = '';
-  const flush = ()=>{ pages.push(cur || '<p></p>'); cur=''; };
+  const card  = document.createElement('div');
+  card.className = 'page-card';
+  card.style.height = '100%';
+  card.style.width  = '100%';
 
-  const fits = (candidate)=>{
-    meas.innerHTML = candidate;
-    const h = meas.scrollHeight;
-    const lines = Math.floor(h / lh + 0.01);
-    return (h <= maxH) && (lines <= MAX_LINES);
+  const inner = document.createElement('div');
+  inner.className = 'page-inner';
+  inner.style.overflow = 'hidden';
+
+  card.appendChild(inner);
+  shell.appendChild(card);
+  stage.appendChild(shell);
+
+  // line-height אמיתי; אם "normal" ניפול לברירת מחדל נאה
+  let lh = parseFloat(getComputedStyle(inner).lineHeight);
+  if (!lh || Number.isNaN(lh)) {
+    const fs = parseFloat(getComputedStyle(inner).fontSize) || 16;
+    lh = fs * 1.7; // קירוב סביר ל-line-height שלך
+  }
+
+  const fitsLines = (html) => {
+    inner.innerHTML = html;
+    const lines = Math.floor((inner.scrollHeight / lh) + 0.01);
+    return lines <= MAX_LINES_PER_PAGE;
   };
 
-  // מפצל פסקה ארוכה לפי כמות תווים מקסימלית שמתאימה לעמוד
-  const appendParagraphByLines = (pHtml)=>{
-    const tmp = document.createElement('div');
-    tmp.innerHTML = pHtml;
-    const text = tmp.textContent || '';
+  const fitsHeight = (html) => {
+    inner.innerHTML = html;
+    return inner.scrollHeight <= inner.clientHeight;
+  };
 
-    let start = 0;
-    while (start < text.length){
-      // כל השאר נכנס? הוסף וסיים
-      let candidate = cur + '<p>' + escapeHTML(text.slice(start)) + '</p>';
-      if (fits(candidate)){ cur = candidate; break; }
+  // ספירת מילים מהירה
+  const countWords = (txt) => {
+    const m = txt.trim().match(/\S+/g);
+    return m ? m.length : 0;
+  };
 
-      // אפילו תו אחד לא נכנס בעמוד הנוכחי? שבור עמוד
-      candidate = cur + '<p>' + escapeHTML(text.slice(start, start+1)) + '</p>';
-      if (!fits(candidate)){ flush(); continue; }
+  // HTML לבלוקים שאינם פסקה (או השתמש ב-tokenHTML(tk) אם יש לך כבר)
+  const blockHTML = (tk) => {
+    if (tk.type === 'sep')  return '<hr class="separator">';
+    if (tk.type === 'meta') return tk.html;
+    if (tk.type === 'img')  return `
+      <figure class="img-block" data-src="${tk.src}">
+        <img alt="" decoding="async" loading="lazy" src="${tk.src}">
+        <button class="img-open" title="פתח באיכות מלאה">↔️</button>
+      </figure>`;
+    if (tk.type === 'p')    return tk.html;
+    return '';
+  };
 
-      // חיפוש בינארי – כמה תווים מקסימום נכנסים בעמוד הנוכחי
-      let low = 1, high = text.length - start;
-      while (low < high){
-        const mid = Math.ceil((low + high) / 2);
-        candidate = cur + '<p>' + escapeHTML(text.slice(start, start+mid)) + '</p>';
-        if (fits(candidate)) low = mid; else high = mid - 1;
+  // מצב עמוד נוכחי
+  let curHTML   = '';
+  let curWords  = 0;
+
+  const flush = () => {
+    pages.push(curHTML.trim() ? curHTML : '<p></p>');
+    curHTML  = '';
+    curWords = 0;
+  };
+
+  // נסה לצרף html לעמוד הנוכחי – תוך בדיקת שורות/גובה
+  const tryAppend = (html) => {
+    const candidate = curHTML + html;
+    return fitsHeight(candidate) && fitsLines(candidate);
+  };
+
+  // פסקה ארוכה – נוסיף מילה-מילה עד שנחצה יעד/שורות/גובה
+  const appendParagraphByWords = (pHtml) => {
+    const raw = pHtml.replace(/^<p>/,'').replace(/<\/p>$/,'').replace(/\s+/g,' ').trim();
+    if (!raw.length){
+      // פסקה ריקה
+      if (!tryAppend('<p>&nbsp;</p>')) flush();
+      curHTML += '<p>&nbsp;</p>';
+      return;
+    }
+
+    const words = raw.split(' ');
+    let buf = [];
+
+    for (let i = 0; i < words.length; i++){
+      const w = words[i];
+
+      // האם חצינו יעד מילים? אם כן—נשבור לפני שמוסיפים עוד
+      if (curWords >= WORDS_PER_PAGE_TARGET){
+        // יש משהו בבאפר? נסגור אותו לדף ונפלוש
+        if (buf.length){
+          const chunk = `<p>${buf.join(' ')}</p>`;
+          if (!tryAppend(chunk)) flush(); // ביטחון
+          curHTML += chunk;
+          buf = [];
+        }
+        flush();
       }
 
-      // הוסף את הקטע שנכנס
-      cur = cur + '<p>' + escapeHTML(text.slice(start, start+low)) + '</p>';
-      start += low;
+      // ננסה להוסיף את המילה לפסקה הנוכחית
+      const nextBuf = buf.length ? (buf.join(' ') + ' ' + w) : w;
+      const nextHtml = `<p>${nextBuf}</p>`;
 
-      // עוד נשאר טקסט? שבור לעמוד הבא
-      if (start < text.length) flush();
+      if (tryAppend(nextHtml)){
+        buf.push(w);
+        curWords += 1;
+      } else {
+        // המילה לא נכנסת – קודם נסגור את מה שכן נכנס
+        if (buf.length){
+          const chunk = `<p>${buf.join(' ')}</p>`;
+          if (!tryAppend(chunk)) flush();
+          curHTML += chunk;
+          buf = [];
+        } else {
+          // קצה קיצון: גם מילה בודדת לא נכנסת בעמוד הנוכחי → שבור עמוד
+          flush();
+        }
+
+        // נסה שוב בעמוד חדש
+        const freshHtml = `<p>${w}</p>`;
+        if (!tryAppend(freshHtml)) {
+          // במקרה קיצון נוסף (גובה/שורות קשיחים מאוד) – נכפה
+          curHTML += freshHtml;
+        } else {
+          curHTML += freshHtml;
+        }
+        curWords += 1;
+      }
+    }
+
+    // סגור שאריות פסקה לעמוד הנוכחי
+    if (buf.length){
+      const chunk = `<p>${buf.join(' ')}</p>`;
+      if (!tryAppend(chunk)) flush();
+      curHTML += chunk;
     }
   };
 
   for (const tk of tokens){
     if (tk.type === 'p'){
-      appendParagraphByLines(tk.html);
+      appendParagraphByWords(tk.html);
       continue;
     }
 
-    // תמונה/קו מפריד/מטא – כבלוק אחד
-    const html = tokenHTML(tk);
-    if (fits(cur + html)) {
-      cur += html;
-    } else {
+    // בלוקים אחרים – משקל מילים כדי לא לדחוס טקסט מעליהם
+    const html = blockHTML(tk);
+    const weight = (tk.type === 'img') ? IMG_WEIGHT
+                 : (tk.type === 'sep') ? SEP_WEIGHT
+                 : 0;
+
+    // אם ה"משקל" יפוצץ את היעד—שבור עמוד קודם (רק אם יש כבר תוכן)
+    if (curWords > 0 && curWords + weight > WORDS_PER_PAGE_TARGET){
       flush();
-      cur = html; // אם גבוה מדי, ודא שיש max-height לתמונה ב-CSS
     }
+
+    if (!tryAppend(html)) {
+      flush();
+    }
+    curHTML += html;
+    curWords += weight;
   }
 
-  if (cur) flush();
-  meas.remove();
+  if (curHTML.trim()) flush();
+
+  shell.remove(); // ניקוי המודד
   return pages;
 }
 
