@@ -173,72 +173,89 @@ function splitParagraphHTML(html){
 }
 
 function paginate(tokens){
-  // === פרמטרים לכיוונון מהיר ===
-  const WORDS_PER_PAGE_TARGET = 165; // ~16 שורות במסך טלפון; כוון 150–180 לפי הטעם
-  const MAX_LINES_PER_PAGE    = 16;  // מגבלת שורות חזותית אמיתית
-  const IMG_WEIGHT            = 40;  // "עלות" תמונה במילים (כדי שלא נדחוף טקסט מעליה)
-  const SEP_WEIGHT            = 10;  // "עלות" מפריד ****** במילים
+  // ≈16 שורות בעמוד על מסך טלפון; כוון 150–180 לפי הטעם שלך
+  const WORDS_PER_PAGE = 165;
+  const IMG_WEIGHT = 40; // תמונה שווה ~3–4 שורות
+  const SEP_WEIGHT = 10; // ****** שווה קצת "מילים"
+  const META_WEIGHT = 0;
 
   const pages = [];
+  let curHTML = '';
+  let curWords = 0;
 
-  // --- מודד אמיתי זהה לדף ---
-  const stage = document.getElementById('stage');
-  const shell = document.createElement('div');
-  shell.style.visibility = 'hidden';
-  shell.style.position   = 'absolute';
-  shell.style.inset      = '0';
-  shell.style.pointerEvents = 'none';
-  shell.style.zIndex = '-1';
+  const flush = () => {
+    pages.push(curHTML.trim() ? curHTML : '<p></p>');
+    curHTML  = '';
+    curWords = 0;
+  };
 
-  const card  = document.createElement('div');
-  card.className = 'page-card';
-  card.style.height = '100%';
-  card.style.width  = '100%';
+  // הוספת בלוק לא-פסקה עם "משקל" מילים
+  const addBlock = (html, weight) => {
+    if (curWords > 0 && curWords + weight > WORDS_PER_PAGE) flush();
+    curHTML += html;
+    curWords += weight;
+    if (curWords >= WORDS_PER_PAGE) flush();
+  };
 
-  const inner = document.createElement('div');
-  inner.className = 'page-inner';
-  inner.style.overflow = 'hidden';
+  // חילוץ טקסט נקי מתוך <p>…</p>
+  const textOf = (pHtml) => {
+    const div = document.createElement('div');
+    div.innerHTML = pHtml;
+    return (div.textContent || '').replace(/\s+/g,' ').trim();
+  };
 
-  card.appendChild(inner);
-  shell.appendChild(card);
-  stage.appendChild(shell);
+  for (const tk of tokens){
+    if (tk.type === 'p'){
+      let text = textOf(tk.html);
+      if (!text){
+        addBlock('<p>&nbsp;</p>', 1);
+        continue;
+      }
 
-  // line-height אמיתי; אם "normal" ניפול לברירת מחדל נאה
-  let lh = parseFloat(getComputedStyle(inner).lineHeight);
-  if (!lh || Number.isNaN(lh)) {
-    const fs = parseFloat(getComputedStyle(inner).fontSize) || 16;
-    lh = fs * 1.7; // קירוב סביר ל-line-height שלך
+      let words = text.split(' ');
+      // נחתוך את הפסקה למקטעים שלא עוברים את מכסת המילים של העמוד
+      while (words.length){
+        const capacity = WORDS_PER_PAGE - curWords;
+        if (capacity <= 0) { flush(); continue; }
+
+        const take = Math.min(capacity, words.length);
+        const chunk = words.splice(0, take);
+
+        curHTML += `<p>${chunk.join(' ')}</p>`;
+        curWords += chunk.length;
+
+        if (curWords >= WORDS_PER_PAGE && words.length){
+          flush();
+        }
+      }
+      continue;
+    }
+
+    if (tk.type === 'img'){
+      addBlock(
+        `<figure class="img-block" data-src="${tk.src}">
+           <img alt="" decoding="async" loading="lazy" src="${tk.src}">
+           <button class="img-open" title="פתח באיכות מלאה">↔️</button>
+         </figure>`,
+        IMG_WEIGHT
+      );
+      continue;
+    }
+
+    if (tk.type === 'sep'){
+      addBlock('<hr class="separator">', SEP_WEIGHT);
+      continue;
+    }
+
+    if (tk.type === 'meta'){
+      addBlock(tk.html, META_WEIGHT);
+      continue;
+    }
   }
 
-  const fitsLines = (html) => {
-    inner.innerHTML = html;
-    const lines = Math.floor((inner.scrollHeight / lh) + 0.01);
-    return lines <= MAX_LINES_PER_PAGE;
-  };
-
-  const fitsHeight = (html) => {
-    inner.innerHTML = html;
-    return inner.scrollHeight <= inner.clientHeight;
-  };
-
-  // ספירת מילים מהירה
-  const countWords = (txt) => {
-    const m = txt.trim().match(/\S+/g);
-    return m ? m.length : 0;
-  };
-
-  // HTML לבלוקים שאינם פסקה (או השתמש ב-tokenHTML(tk) אם יש לך כבר)
-  const blockHTML = (tk) => {
-    if (tk.type === 'sep')  return '<hr class="separator">';
-    if (tk.type === 'meta') return tk.html;
-    if (tk.type === 'img')  return `
-      <figure class="img-block" data-src="${tk.src}">
-        <img alt="" decoding="async" loading="lazy" src="${tk.src}">
-        <button class="img-open" title="פתח באיכות מלאה">↔️</button>
-      </figure>`;
-    if (tk.type === 'p')    return tk.html;
-    return '';
-  };
+  if (curHTML.trim()) flush();
+  return pages;
+}
 
   // מצב עמוד נוכחי
   let curHTML   = '';
