@@ -1,231 +1,383 @@
-// Reader (Columns) — עימוד לפי גובה מסך עם CSS Columns
-// * טוען books/<slug>/book.txt
-// * {image-N} -> <img> (ברירת מחדל .jpeg, fallback .jpg; ל-cover בד"כ .jpg)
-// * ****** -> <hr class="separator">
-// * גלילה/החלקה/כפתורים בין עמודים, מונה, GoTo + פרמטר &page=
-// * התאמה דינמית לגודל מסך, ספירת עמודים מדויקת גם אחרי טעינת תמונות
+// Reader יציב ומהיר: עימוד חזותי לפי גובה, Lazy Images, שמירת DOM קטן,
+// טעינה של עמוד נוכחי + שכנים בלבד, תמונות ב-LQ עד לטעינה, וכפתור לאיכות מלאה.
+//
+// מבנה ספר: books/<slug>/book.txt  +  books/<slug>/images/image-N.(jpeg|jpg|png|webp)
+// הערה: הקאבר יכול להיות .jpg – קבצי התוכן ברובם .jpeg. יש זיהוי אוטומטי.
 
-(function(){
-  const $ = s => document.querySelector(s);
-  const qs = k => {
-    const v = new URLSearchParams(location.search).get(k);
-    return v ? decodeURIComponent(v) : null;
+// ---------- כלי עזר ----------
+const EXTENSIONS = ['.jpeg', '.jpg', '.png', '.webp'];
+
+const qs = name => {
+  const v = new URLSearchParams(location.search).get(name);
+  return v ? decodeURIComponent(v) : null;
+};
+
+const $ = sel => document.querySelector(sel);
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+const fetchText = async (url) => {
+  const r = await fetch(url + `?v=${Date.now()}`, { cache:'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return await r.text();
+};
+
+// בדיקת קובץ תמונה קיים
+async function probeImage(baseUrl){
+  for (const ext of EXTENSIONS){
+    const url = `${baseUrl}${ext}`;
+    const ok = await new Promise(res=>{
+      const im = new Image();
+      im.onload = ()=>res(true);
+      im.onerror = ()=>res(false);
+      im.src = url;
+    });
+    if (ok) return url;
+  }
+  return null;
+}
+
+// escape בסיסי
+const escapeHTML = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+// ---------- המרה לטוקנים ----------
+/*
+  הופך את הטקסט ל"טוקנים" (יחידות עימוד):
+  - פסקאות
+  - מפריד ****** => <hr>
+  - תמונות => בלוק עם יחס ממדים יציב (נטען תמונה עצלה כשמופיעה)
+*/
+async function textToTokens(raw, imgDir){
+  // Place/Date בתחילת הספר (לא חובה)
+  let place=null, date=null;
+  raw = raw.replace(/^(Place:\s*)(.+)\s*\r?\n/i, (_,p,v)=>{ place=v.trim(); return ''; });
+  raw = raw.replace(/^(Date:\s*)(.+)\s*\r?\n/i,  (_,p,v)=>{ date=v.trim();  return ''; });
+
+  // החלפת {image-N} לפלייסהולדרים עם נתיב קבוע מראש
+  const jobs = [];
+  raw = raw.replace(/\{image-(\d+)\}/g, (m,n)=>{
+    const ph = `@@IMG_${n}@@`;
+    jobs.push((async ()=>{
+      const src = await probeImage(`${imgDir}/image-${n}`);
+      return {ph, src};   // ייתכן null => נציג "חסר"
+    })());
+    return ph;
+  });
+  const imgs = await Promise.all(jobs);
+
+  // פיצול לשורות → יצירת טוקנים
+  const tokens = [];
+  const pushP = (txt) => {
+    const t = txt.trim();
+    if (!t) return;
+    tokens.push({type:'p', html:`<p>${escapeHTML(t)}</p>`});
   };
 
-  const setLoading = on => {
-    const el = document.getElementById('loadingOverlay');
-    if (el) el.style.display = on ? 'grid' : 'none';
+  let buf = '';
+  const lines = raw.split(/\r?\n/);
+  for (let line of lines){
+    // החזרת הפלייסהולדרים לטוקן תמונה
+    const m = line.match(/^@@IMG_(\d+)@@\s*$/);
+    if (m){
+      if (buf) { pushP(buf); buf=''; }
+      const ref = imgs.find(x => x.ph === `@@IMG_${m[1]}@@`);
+      if (ref && ref.src){
+        tokens.push({type:'img', src: ref.src});
+      }else{
+        tokens.push({type:'sep'});
+        tokens.push({type:'p', html:`<p><em>Missing image ${m[1]}</em></p>`});
+        tokens.push({type:'sep'});
+      }
+      continue;
+    }
+
+    // קו מפריד מכוכביות
+    if (/^\*{6,}\s*$/.test(line)){
+      if (buf) { pushP(buf); buf=''; }
+      tokens.push({type:'sep'});
+      continue;
+    }
+
+    // שורה ריקה = סוף פסקה
+    if (/^\s*$/.test(line)){
+      if (buf) { pushP(buf); buf=''; }
+      continue;
+    }
+
+    // אחרת – צבירת פסקה
+    buf += (buf ? '\n' : '') + line;
+  }
+  if (buf) pushP(buf);
+
+  // הזרקת Place/Date לראש הדפים
+  if (date || place){
+    const pills=[];
+    if (date)  pills.push(`<span class="pill">Date: ${escapeHTML(date)}</span>`);
+    if (place) pills.push(`<span class="pill">Place: ${escapeHTML(place)}</span>`);
+    tokens.unshift({type:'meta', html:`<div class="meta-pills">${pills.join(' ')}</div>`});
+  }
+
+  return tokens;
+}
+
+// ---------- עימוד חזותי ----------
+/*
+  נעשה מדידה אמיתית בתוך page-inner "מדידה" נסתר.
+  מוסיפים טוקן-טוקן עד שהוא לא נכנס → חותכים לפסקאות לפי מילים.
+  בלוקי תמונה הם קבועי גובה (aspect-ratio) ולכן לא שוברים את העימוד.
+*/
+function makeMeasurer(){
+  const meas = document.createElement('div');
+  meas.className = 'page-inner';
+  meas.style.position = 'absolute';
+  meas.style.visibility = 'hidden';
+  meas.style.pointerEvents = 'none';
+  meas.style.inset = '0';
+  $('#stage').appendChild(meas);
+  return meas;
+}
+
+function getMaxContentHeight(){
+  // גובה פנימי אמיתי של ה-page-inner
+  const stage = $('#stage');
+  const style = getComputedStyle(stage);
+  const avail = stage.clientHeight
+    - parseFloat(style.paddingTop||0)
+    - parseFloat(style.paddingBottom||0)
+    - 0;
+  // הפחתה קלה לריווח בטוח
+  return Math.max(200, avail - 6);
+}
+
+function tokenHTML(tk){
+  if (tk.type === 'p')   return tk.html;
+  if (tk.type === 'meta')return tk.html;
+  if (tk.type === 'sep') return '<hr class="separator">';
+  if (tk.type === 'img'){
+    // בלוק עם יחס יציב; נטען תמונה אמיתית רק כשהעמוד מוצג
+    return `
+      <figure class="img-block" data-src="${tk.src}">
+        <img alt="" decoding="async" loading="lazy" src="${tk.src}">
+        <button class="img-open" title="פתח באיכות מלאה">↔️</button>
+      </figure>`;
+  }
+  return '';
+}
+
+function splitParagraphHTML(html){
+  // מפצל פסקה ל"חלקי מילים" כדי למלא עמוד יפה.
+  // קלט כמו "<p>some text…</p>" → מוציא רק הטקסט הפנימי
+  const text = html.replace(/^<p>/,'').replace(/<\/p>$/,'');
+  const parts = text.split(/(\s+)/); // שומר רווחים
+  return parts.map(p => escapeHTML(p)).map(p => p ? `<span>${p}</span>` : p);
+}
+
+function paginate(tokens){
+  const pages = [];
+  const meas = makeMeasurer();
+  const maxH = getMaxContentHeight();
+
+  let cur = '';      // HTML של העמוד הנוכחי
+  const flush = ()=>{
+    pages.push(cur || '<p></p>');
+    cur = '';
   };
 
-  function setCounter(page, total){
-    const c = $('#counter');
-    if (c) c.textContent = `${page+1}/${Math.max(total,1)}`;
-    const prev = $('#prev'), next = $('#next');
-    if (prev) prev.disabled = (page<=0);
-    if (next) next.disabled = (page>=total-1);
-  }
+  const fits = (candidate)=>{
+    meas.innerHTML = candidate;
+    return meas.scrollHeight <= maxH;
+  };
 
-  async function fetchText(url){
-    const r = await fetch(url + `?v=${Date.now()}`, {cache:'no-store'});
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.text();
-  }
+  for (const tk of tokens){
+    const html = tokenHTML(tk);
 
-  // --- המרת טקסט ל-HTML: פסקאות, תמונות, מפרידים ---
-  function normalizeLines(raw){ return raw.replace(/\r\n/g, '\n'); }
+    // בלוקים שאינם פסקאות – מנסים להכניס שלמים
+    if (tk.type !== 'p'){
+      const tryHtml = cur + html;
+      if (fits(tryHtml)){
+        cur = tryHtml;
+      }else{
+        flush();
+        // אם לא נכנס בעמוד ריק (נדיר), נכריח בדף נפרד
+        if (!fits(html)) {
+          // במקרים חריגים (כמעט לא קורה) – נכפה גובה קטן יותר:
+          meas.style.paddingBottom = '20px';
+        }
+        cur = html;
+      }
+      continue;
+    }
 
-  function toBlocks(raw, imgBase){
-    // בלוקים: paragraph / hr / image
-    const out = [];
-    const lines = normalizeLines(raw).split('\n');
-
-    const pushPara = buf=>{
-      const text = buf.join(' ').trim();
-      if(text) out.push({t:'p', html: escapeHTML(text)});
-    };
-
-    let buf = [];
-    for(const ln of lines){
-      if (/^\*{6,}\s*$/.test(ln)){
-        if (buf.length) { pushPara(buf); buf=[]; }
-        out.push({t:'hr'});
-      } else if (/^\s*$/.test(ln)){
-        if (buf.length) { pushPara(buf); buf=[]; }
-      } else if (/^\{image-(\d+)\}\s*$/.test(ln.trim())){
-        if (buf.length) { pushPara(buf); buf=[]; }
-        const n = parseInt(RegExp.$1, 10);
-        out.push({t:'img', n, base: imgBase});
-      } else {
-        buf.push(ln.trim());
+    // פסקה – נפרק למקטעים קטנים
+    const chunks = splitParagraphHTML(html);
+    let buf = '<p>';
+    for (const part of chunks){
+      const tryHtml = cur + buf + part + '</p>';
+      if (fits(tryHtml)){
+        buf += part;
+      }else{
+        // אם אין שום תוכן בבאפר – נשבור את העמוד קודם
+        if (buf === '<p>'){
+          flush();
+          buf = '<p>' + part;
+        }else{
+          cur += buf + '</p>';
+          flush();
+          buf = '<p>' + part;
+        }
       }
     }
-    if (buf.length) pushPara(buf);
-    return out;
+    cur += buf + '</p>';
   }
+  if (cur) flush();
 
-  function escapeHTML(s){
-    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-  }
+  meas.remove();
+  return pages;
+}
 
-  function imgTag(base, n){
-    // רוב התמונות .jpeg; ל-cover לעתים .jpg — נוסיף fallback
-    const prefer = (n===1) ? 'jpg' : 'jpeg';
-    const alt    = (prefer==='jpg') ? 'jpeg' : 'jpg';
-    const p0 = `${base}/image-${n}.${prefer}`;
-    const p1 = `${base}/image-${n}.${alt}`;
-    // width/height רצוי אם ידועים – לשמירת יחס ולמניעת קפיצות
-    return `<figure class="page-column" style="margin:0;display:block;">
-      <img src="${p0}" loading="lazy" decoding="async"
-           onerror="this.onerror=null;this.src='${p1}';"
-           alt="image-${n}">
-    </figure>`;
-  }
+// ---------- מציג עמוד + Lazy Images + שכנים ----------
+let PAGES = [];        // מערך HTML של עמודים
+let INDEX = 0;         // עמוד נוכחי
+let RENDERED = new Map(); // זיכרון קטן לעמודים סמוכים
 
-  function blocksToHTML(blocks){
-    // עוטפים כל בלוק ב-.page-column כדי לאפשר snap ו-avoid split
-    let html = '';
-    for(const b of blocks){
-      if (b.t==='p'){
-        html += `<p class="page-column">${b.html}</p>`;
-      } else if (b.t==='hr'){
-        html += `<div class="page-column"><hr class="separator"></div>`;
-      } else if (b.t==='img'){
-        html += imgTag(b.base, b.n);
-      }
+function setCounter(i, total){
+  $('#counter').textContent = `${i+1}/${Math.max(total,1)}`;
+  $('#prev').disabled = (i<=0);
+  $('#next').disabled = (i>=total-1);
+}
+
+function mountHTML(html){
+  const host = $('#page');
+  host.innerHTML = html;
+
+  // Lazy image: כבר יש לנו <img> עם src; אנחנו פשוט מסירים blur כשנטען,
+  // ומשאירים רק בעמוד מוצג. ביציאה מהעמוד ננקה כדי לשמור על זיכרון.
+  host.querySelectorAll('.img-block').forEach(block=>{
+    const img = block.querySelector('img');
+    const full = block.getAttribute('data-src') || img.currentSrc || img.src;
+
+    if (!img.complete){
+      img.addEventListener('load', ()=> block.classList.add('loaded'), {once:true});
+      img.addEventListener('error',()=> block.classList.add('loaded'), {once:true});
+    }else{
+      block.classList.add('loaded');
     }
-    return html;
+
+    // פתיחה באיכות מלאה
+    block.querySelector('.img-open').addEventListener('click', (e)=>{
+      e.stopPropagation();
+      window.open(full, '_blank');
+    });
+  });
+}
+
+function render(i, noAnim=false){
+  INDEX = Math.max(0, Math.min(PAGES.length-1, i));
+  setCounter(INDEX, PAGES.length);
+
+  const card = $('.page-card');
+  if (!noAnim){
+    card.style.transition='opacity .18s ease';
+    card.style.opacity='0';
   }
 
-  // --- Columns pagination helpers ---
-  function setPageWidthCSS(px){
-    const el = document.getElementById('columns');
-    if (el) el.style.columnWidth = px + 'px';
+  // ננקה DOM של תמונות ישנות כדי לחסוך זיכרון
+  $('#page').innerHTML = '';
+
+  // מציגים
+  mountHTML(PAGES[INDEX]);
+
+  // קאפיינג: נשמור HTML בלבד (לא DOM) – אין פה דליפת זיכרון
+  RENDERED.clear();
+  if (PAGES[INDEX-1]) RENDERED.set(INDEX-1, PAGES[INDEX-1]);
+  if (PAGES[INDEX])   RENDERED.set(INDEX,   PAGES[INDEX]);
+  if (PAGES[INDEX+1]) RENDERED.set(INDEX+1, PAGES[INDEX+1]);
+
+  requestAnimationFrame(()=>{
+    if (!noAnim){
+      card.style.opacity='1';
+    }
+  });
+}
+
+// ---------- מחוות ותפעול ----------
+function enableSwipe(onLeft, onRight){
+  const el = $('#stage');
+  let x0=null, y0=null, t0=0;
+  const minDx=40, maxDy=60, maxT=600;
+  el.addEventListener('touchstart', e=>{
+    const t=e.touches[0]; x0=t.clientX; y0=t.clientY; t0=Date.now();
+  },{passive:true});
+  el.addEventListener('touchend', e=>{
+    if(x0==null) return;
+    const t=e.changedTouches[0];
+    const dx=t.clientX-x0, dy=Math.abs(t.clientY-y0), dt=Date.now()-t0;
+    x0=null;
+    if(dy<maxDy && dt<maxT && Math.abs(dx)>minDx){
+      if(dx<0) onRight(); else onLeft();
+    }
+  },{passive:true});
+}
+
+// ---------- Init ----------
+(async function init(){
+  $('#back').onclick = ()=> history.back();
+  $('#jump').onclick = ()=>{
+    const n = prompt(`קפיצה לעמוד (1–${PAGES.length || 1})`, String(INDEX+1));
+    const i = Math.max(1, Math.min(PAGES.length, parseInt(n,10)||1));
+    render(i-1);
+  };
+  $('#prev').onclick = ()=> render(INDEX-1);
+  $('#next').onclick = ()=> render(INDEX+1);
+  enableSwipe(()=>render(INDEX-1), ()=>render(INDEX+1));
+
+  const slug = qs('book');
+  if(!slug){
+    $('#page').innerHTML = '<p>Missing ?book=</p>';
+    return;
   }
 
-  function getPageMetrics(){
-    const el = document.getElementById('columns');
-    if (!el) return {pageW:1, pages:1};
-    const pageW = el.clientWidth || 1;    // רוחב עמוד אחד
-    const totalW = el.scrollWidth || pageW;
-    const pages = Math.max(1, Math.ceil(totalW / pageW));
-    return {pageW, pages};
-  }
+  const txtURL = `books/${slug}/book.txt`;
+  const imgDir = `books/${slug}/images`;
 
-  function scrollToPage(index){
-    const el = document.getElementById('columns');
-    const {pageW, pages} = getPageMetrics();
-    const clamped = Math.max(0, Math.min(index, pages-1));
-    el.scrollTo({ left: clamped * pageW, top: 0, behavior: 'smooth' });
-    setCounter(clamped, pages);
-    return clamped;
-  }
+  try{
+    $('#loader').style.display='grid';
 
-  function currentPageIndex(){
-    const el = document.getElementById('columns');
-    const {pageW} = getPageMetrics();
-    return Math.round((el.scrollLeft || 0) / Math.max(1,pageW));
-  }
-
-  // --- Throttle/Resize helpers ---
-  function throttle(fn, ms){
-    let t=0, timer=null, lastArgs=null;
-    return (...args)=>{
-      const now=Date.now(); lastArgs=args;
-      if (now - t > ms){ t=now; fn(...lastArgs); }
-      else{
-        clearTimeout(timer);
-        timer = setTimeout(()=>{ t=Date.now(); fn(...lastArgs); }, ms);
-      }
-    };
-  }
-
-  function askGoto(){
-    const {pages} = getPageMetrics();
-    const cur = currentPageIndex();
-    const v = prompt(`לאיזה עמוד לקפוץ? (1–${pages})`, String(cur+1));
-    if(!v) return;
-    const n = Math.max(1, Math.min(pages, parseInt(v,10)||1));
-    scrollToPage(n-1);
-  }
-
-  // --- Init ---
-  (async function(){
-    const slug = qs('book');
-    if (!slug){
-      const c = $('#columns');
-      if (c) c.innerHTML = '<div class="page-column"><p>Missing ?book=…</p></div>';
+    // 1) טען טקסט
+    let raw = await fetchText(txtURL);
+    if (!raw.trim()){
+      $('#page').innerHTML = '<p>Empty book.txt</p>';
+      $('#loader').style.display='none';
       return;
     }
-    setLoading(true);
 
-    try{
-      const txtURL = `books/${slug}/book.txt`;
-      const imgBase = `books/${slug}/images`;
+    // 2) המר לטוקנים (כולל זיהוי קבצי תמונה קיימים)
+    const tokens = await textToTokens(raw, imgDir);
 
-      let raw = await fetchText(txtURL);
+    // 3) עימוד חזותי – דפי HTML מוכנים
+    PAGES = paginate(tokens);
 
-      // אופציונלי: הסרת Place/Date בתחילת הטקסט אם מופיעים
-      raw = raw.replace(/^(Place:\s*[^\n]+)\n/i,'')
-               .replace(/^(Date:\s*[^\n]+)\n/i,'');
+    // 4) תצוגה ראשונה
+    render(0, /*noAnim*/ true);
 
-      const blocks = toBlocks(raw, imgBase);
-      const html   = blocksToHTML(blocks);
+    // 5) סיום טעינה
+    await sleep(120);
+    $('#loader').style.display='none';
 
-      const columns = $('#columns');
-      columns.innerHTML = html;
-
-      // column-width = רוחב אזור הטקסט האמיתי בתוך הקלף
-      const stageInner = document.querySelector('.page-inner');
-      setPageWidthCSS(stageInner.clientWidth);
-
-      // מונה ראשוני
-      let {pages} = getPageMetrics();
-      setCounter(0, pages);
-
-      // ניווט בכפתורים
-      const prev = $('#prev'), next = $('#next');
-      if (prev) prev.onclick = ()=> scrollToPage(currentPageIndex()-1);
-      if (next) next.onclick = ()=> scrollToPage(currentPageIndex()+1);
-      const gotoBtn = $('#gotoBtn');
-      if (gotoBtn) gotoBtn.onclick = askGoto;
-
-      // עידכון מונה בעת גלילה/החלקה (Scroll Snap יעזור לנעילה בעמודים)
-      columns.addEventListener('scroll', throttle(()=>{
-        const {pages} = getPageMetrics();
-        setCounter(currentPageIndex(), pages);
-      }, 80), {passive:true});
-
-      // תמונות עשויות לשנות פריסה → עדכון מונה לאחר טעינה
-      const refreshAfterImages = throttle(()=>{
-        const cur = currentPageIndex();
-        const {pages} = getPageMetrics();
-        setCounter(cur, pages);
-      }, 120);
-      columns.querySelectorAll('img').forEach(im=>{
-        im.addEventListener('load', refreshAfterImages, {once:true});
-        im.addEventListener('error', refreshAfterImages, {once:true});
+    // 6) ריסייז – מחשב עימוד מחדש, ועדיין נשאר באותו עמוד לוגית
+    addEventListener('resize', ()=>{
+      const keep = INDEX;
+      $('#loader').style.display='grid';
+      requestAnimationFrame(()=>{
+        PAGES = paginate(tokens);
+        render(Math.min(keep, PAGES.length-1), true);
+        $('#loader').style.display='none';
       });
+    });
 
-      // שינויי גודל/סיבוב – מחשבים מחדש column-width ושומרים מיקום
-      const onResize = throttle(()=>{
-        setPageWidthCSS(stageInner.clientWidth);
-        const cur = currentPageIndex();
-        const clamp = scrollToPage(cur);
-        const {pages} = getPageMetrics();
-        setCounter(clamp, pages);
-      }, 150);
-      addEventListener('resize', onResize);
-
-      // פתיחה עם &page= (1-based)
-      const p0 = parseInt(qs('page')||'',10);
-      if (p0 && p0>0) scrollToPage(p0-1);
-
-    }catch(err){
-      console.error(err);
-      const c = $('#columns');
-      if (c) c.innerHTML = `<div class="page-column"><p>Failed to load book.<br>${String(err)}</p></div>`;
-    }finally{
-      setLoading(false);
-    }
-  })();
+  }catch(err){
+    console.error(err);
+    $('#page').innerHTML = `<p>אירעה שגיאה בטעינת הספר:<br>${escapeHTML(String(err))}</p>`;
+    $('#loader').style.display='none';
+  }
 })();
