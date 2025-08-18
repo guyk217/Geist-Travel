@@ -114,96 +114,127 @@ async function textToTokens(raw, imgDir){
   return tokens;
 }
 
-// ---------- עימוד לפי שורות (16 שורות לעמוד) ----------
-function makeMeasurer(){
-  const meas = document.createElement('div');
-  meas.className = 'page-inner';
-  meas.style.position = 'absolute';
-  meas.style.visibility = 'hidden';
-  meas.style.pointerEvents = 'none';
-  meas.style.top = '0';
-  meas.style.left = '0';
-  meas.style.width = $('#page').offsetWidth + 'px';
-  document.body.appendChild(meas);
-  return meas;
+// ---------- מדידת עימוד מדויקת לפי שורות ----------
+function createMeasurer(){
+  const measurer = document.createElement('div');
+  measurer.className = 'page-inner';
+  measurer.style.cssText = `
+    position: absolute;
+    top: -9999px;
+    left: -9999px;
+    visibility: hidden;
+    pointer-events: none;
+    width: ${$('#page').offsetWidth}px;
+  `;
+  document.body.appendChild(measurer);
+  return measurer;
+}
+
+function measureText(measurer, text) {
+  measurer.innerHTML = `<p>${escapeHTML(text)}</p>`;
+  const lineHeight = parseFloat(getComputedStyle(measurer).lineHeight);
+  const actualHeight = measurer.scrollHeight;
+  return Math.round(actualHeight / lineHeight);
 }
 
 function paginate(tokens){
   const LINES_PER_PAGE = 16;
-  const measurer = makeMeasurer();
+  const measurer = createMeasurer();
   const pages = [];
-  let currentPage = '';
+  
+  let currentPageHTML = '';
   let currentLines = 0;
 
-  const getLineCount = (text) => {
-    measurer.innerHTML = `<p>${escapeHTML(text)}</p>`;
-    const singleLineHeight = parseFloat(getComputedStyle(measurer).lineHeight);
-    const actualHeight = measurer.scrollHeight;
-    return Math.ceil(actualHeight / singleLineHeight);
+  const finishPage = () => {
+    if (currentPageHTML.trim()) {
+      pages.push(currentPageHTML);
+    }
+    currentPageHTML = '';
+    currentLines = 0;
   };
 
-  const addToPage = (html, lineCount) => {
-    if (currentLines + lineCount > LINES_PER_PAGE && currentPage) {
-      pages.push(currentPage);
-      currentPage = html;
-      currentLines = lineCount;
-    } else {
-      currentPage += html;
-      currentLines += lineCount;
+  const addContent = (html, lines) => {
+    // אם הוספת התוכן תעבור את 16 השורות - סיים דף נוכחי
+    if (currentLines > 0 && currentLines + lines > LINES_PER_PAGE) {
+      finishPage();
+    }
+    
+    currentPageHTML += html;
+    currentLines += lines;
+    
+    // אם הגענו בדיוק ל-16 שורות - סיים דף
+    if (currentLines >= LINES_PER_PAGE) {
+      finishPage();
     }
   };
 
   for (const token of tokens) {
     if (token.type === 'p') {
-      const text = token.text;
-      const words = text.split(' ');
+      const fullText = token.text;
+      const words = fullText.split(/\s+/);
+      
       let currentParagraph = '';
       
-      for (const word of words) {
-        const testText = currentParagraph ? currentParagraph + ' ' + word : word;
-        const lineCount = getLineCount(testText);
+      for (let i = 0; i < words.length; i++) {
+        const word = words[i];
+        const testParagraph = currentParagraph ? currentParagraph + ' ' + word : word;
+        const testLines = measureText(measurer, testParagraph);
         
-        if (lineCount <= LINES_PER_PAGE - currentLines || !currentParagraph) {
-          currentParagraph = testText;
+        // בדוק אם הוספת המילה תגרום לחריגה מהמקום הפנוי
+        const linesNeeded = testLines;
+        const availableLines = LINES_PER_PAGE - currentLines;
+        
+        if (linesNeeded <= availableLines || currentLines === 0) {
+          // המילה נכנסת - הוסף אותה
+          currentParagraph = testParagraph;
         } else {
-          // Add current paragraph and start new one
+          // המילה לא נכנסת - סיים את הפסקה הנוכחית
           if (currentParagraph) {
-            const html = `<p>${escapeHTML(currentParagraph)}</p>`;
-            const lines = getLineCount(currentParagraph);
-            addToPage(html, lines);
+            const paragraphHTML = `<p>${escapeHTML(currentParagraph)}</p>`;
+            const paragraphLines = measureText(measurer, currentParagraph);
+            addContent(paragraphHTML, paragraphLines);
           }
+          
+          // התחל פסקה חדשה עם המילה הנוכחית
           currentParagraph = word;
         }
       }
       
+      // סיים את הפסקה האחרונה
       if (currentParagraph) {
-        const html = `<p>${escapeHTML(currentParagraph)}</p>`;
-        const lines = getLineCount(currentParagraph);
-        addToPage(html, lines);
+        const paragraphHTML = `<p>${escapeHTML(currentParagraph)}</p>`;
+        const paragraphLines = measureText(measurer, currentParagraph);
+        addContent(paragraphHTML, paragraphLines);
       }
       
     } else if (token.type === 'img') {
-      const html = `
+      const imageHTML = `
         <figure class="img-block" data-src="${token.src}">
           <img alt="" decoding="async" loading="lazy" src="${token.src}">
           <button class="img-open" title="פתח באיכות מלאה">↔️</button>
         </figure>`;
-      addToPage(html, 4); // Images take ~4 lines
+      
+      // תמונות תופסות בדרך כלל 4-5 שורות (לפי ה-CSS aspect-ratio)
+      const imageLines = 4;
+      addContent(imageHTML, imageLines);
       
     } else if (token.type === 'sep') {
-      addToPage('<hr class="separator">', 1);
+      addContent('<hr class="separator">', 1);
       
     } else if (token.type === 'meta') {
-      const html = `<div class="meta-pills"><span class="pill">${token.html}</span></div>`;
-      addToPage(html, 1);
+      const metaHTML = `<div class="meta-pills"><span class="pill">${token.html}</span></div>`;
+      addContent(metaHTML, 1);
     }
   }
 
-  if (currentPage) {
-    pages.push(currentPage);
+  // סיים את הדף האחרון
+  if (currentPageHTML.trim()) {
+    finishPage();
   }
 
   measurer.remove();
+  
+  // ודא שיש לפחות דף אחד
   return pages.length > 0 ? pages : ['<p>No content found</p>'];
 }
 
