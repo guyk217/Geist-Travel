@@ -1,150 +1,49 @@
-<!doctype html>
-<html lang="he" dir="rtl">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>Benjamin Geist’s Travels</title>
-  <!-- כותרת נאה; לגיבוי בעברית נוסיף מערכתית -->
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Rubik:wght@300;400;500;700&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Amatic+SC:wght@700&family=Kalam:wght@300;400;700&display=swap" rel="stylesheet">
-  <style>
-    :root{
-      --paper:#F5EBDD;
-      --lines:#E9DFC9;
-      --ink:#2B2B2B;
-      --ink-soft:#4b4742;
-      --pill:#2f2c2a;
-      --accent:#6b5b4d;
-      --shadow: 0 10px 22px rgba(0,0,0,.08), 0 2px 6px rgba(0,0,0,.06);
-      --radius:18px;
-    }
-    html,body{height:100%}
-    body{
-      margin:0;
-      color:var(--ink);
-      background:
-        linear-gradient(to bottom, transparent 39px, var(--lines) 40px) repeat-y,
-        var(--paper);
-      background-size: 100% 40px, 100% 40px;
-      font-family: "Rubik","Heebo",-apple-system,system-ui,Segoe UI,Roboto,Arial,"Noto Sans Hebrew","Rubik","Assistant",sans-serif;
-      -webkit-font-smoothing: antialiased;
-      text-rendering: optimizeLegibility;
-    }
-    .wrap{max-width:980px; margin:0 auto; padding:24px clamp(16px,4vw,32px) 80px;}
-    header{ text-align:center; margin: 12px 0 24px }
-    header h1{
-      font-family: "Amatic SC","Rubik",cursive;
-      font-weight:700;
-      font-size: clamp(40px, 8vw, 84px);
-      letter-spacing:.02em;
-      margin:.15em 0 .1em;
-    }
-    header p.subtitle{
-      margin:0;
-      color:var(--ink-soft);
-      font-size: clamp(16px,2.9vw,20px);
-    }
-
-    /* רשימת ספרים */
-    .shelf{
-      display:flex; flex-direction:column; gap:22px;
-      margin-top:26px;
-    }
-    .book-card{
-      position:relative;
-      display:grid;
-      grid-template-columns: min(120px,28vw) 1fr;
-      gap:16px;
-      align-items:center;
-      background:#fff;
-      border-radius: var(--radius);
-      box-shadow: var(--shadow);
-      padding:14px;
-      backdrop-filter: blur(3px);
-    }
-    .book-card .cover{
-      width:100%; height:auto; border-radius:14px;
-      background:#f0f0f0; object-fit:cover; aspect-ratio:3/4;
-      justify-self:end; /* ימני */
-    }
-    .meta h3{
-      margin:.1em 0 0; font-size: clamp(20px,4.3vw,28px);
-      line-height:1.1; font-weight:700;
-    }
-    .meta .year{ color:#7a6d60; font-size: .95rem; margin-inline-start:.35em }
-    .meta p.desc{
-      margin:.45em 0 .9em; color:var(--ink-soft); line-height:1.55;
-    }
-    .meta .actions{ display:flex; gap:10px; align-items:center; flex-wrap:wrap }
-    .btn{
-      display:inline-block; border:none; cursor:pointer; text-decoration:none;
-      background:var(--pill); color:#fff; padding:.55em 1.1em;
-      border-radius: 14px; font-weight:600; box-shadow: var(--shadow);
-      transition: transform .12s ease, opacity .12s ease;
-    }
-    .btn:active{ transform: translateY(1px); opacity:.9 }
-
-    /* כרטיס קטן מקדימה – אופציונלי לסגנון */
-    .thumb{
-      position:absolute; inset-inline-start:14px; inset-block-end:-16px;
-      background:#fff; border-radius:14px; padding:10px; box-shadow: var(--shadow);
-      width:120px; display:none;
-    }
-
-    /* מסכים צרים – הכיסוי נשאר מימין והטקסט משמאל, אבל עם ריווח נעים */
-    @media (max-width:600px){
-      .book-card{ grid-template-columns: 92px 1fr; padding:12px; gap:12px }
-      .meta p.desc{ font-size:.98rem }
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Benjamin Geist's Notebooks</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Homemade+Apple&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-  <div class="wrap">
-    <header>
-      <h1>Benjamin Geist’s Travels</h1>
-      <p class="subtitle">מחברות המסע של בנימין גייסט</p>
+    <div class="paper-texture"></div>
+    <div class="noise-overlay"></div>
+    
+    <header class="hero">
+        <div class="hero-content">
+            <div class="cover-image-wrapper">
+                <img src="images/cover-image.png" alt="Benjamin Geist" class="site-cover-image">
+            </div>
+            <div class="decorative-line top"></div>
+            <h1 class="site-title">
+                <span class="title-the">The</span>
+                <span class="title-main">Notebooks</span>
+                <span class="title-of">of</span>
+                <span class="title-name">Benjamin Geist</span>
+            </h1>
+            <p class="site-subtitle">A Collection of Handwritten Memories</p>
+            <div class="decorative-line bottom"></div>
+        </div>
     </header>
 
-    <section id="shelf" class="shelf" aria-live="polite"></section>
-  </div>
-
-  <script>
-    // טוען את books.json ובונה את הכרטיסים
-    (async function loadShelf(){
-      const root = document.getElementById('shelf');
-      try{
-        const res = await fetch('books/books.json', {cache:'no-store'});
-        if(!res.ok) throw new Error('books.json not found');
-        const books = await res.json();
-
-        if(!Array.isArray(books) || !books.length){
-          root.innerHTML = '<p>אין עדיין ספרים להצגה.</p>';
-          return;
-        }
-
-        root.innerHTML = '';
-        books.forEach(b=>{
-          const card = document.createElement('article');
-          card.className = 'book-card';
-          // נתיבים: cover הוא יחסי לרוט (כבר אצלך כזה)
-          card.innerHTML = `
-            <img class="cover" src="${b.cover}" alt="עטיפת הספר ${b.title}">
-            <div class="meta">
-              <h3>${b.title} <span class="year">${b.subtitle||''}</span></h3>
-              <p class="desc">${b.description||''}</p>
-              <div class="actions">
-                <a class="btn" href="reader.html?book=${encodeURIComponent(b.slug)}">פתח</a>
-              </div>
+    <main class="library">
+        <section class="books-section">
+            <h2 class="section-title">The Archive</h2>
+            <div class="books-grid" id="booksGrid">
+                <!-- Books will be loaded dynamically -->
             </div>
-          `;
-          root.appendChild(card);
-        });
-      }catch(err){
-        console.error(err);
-        root.innerHTML = '<p>תקלה בטעינת רשימת הספרים.</p>';
-      }
-    })();
-  </script>
+        </section>
+    </main>
+
+    <footer class="site-footer">
+        <p>Preserved with care · <span id="currentYear"></span></p>
+    </footer>
+
+    <script src="js/books-data.js"></script>
+    <script src="js/home.js"></script>
 </body>
 </html>
